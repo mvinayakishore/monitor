@@ -75,6 +75,21 @@
         .camera-btn:disabled { opacity: 0.4; }
         .camera-btn.active { background: #ffd700; color: #1a1a2e; }
         
+        .action-controls {
+            background: #1a1a2e; padding: 12px;
+            display: flex; gap: 12px;
+            border-bottom: 1px solid #ffd70033;
+        }
+        .action-btn {
+            background: #5a1e1e; color: #ff6b6b;
+            border: 1px solid #ff6b6b; padding: 10px;
+            border-radius: 25px; font-size: 13px;
+            cursor: pointer; flex: 1;
+            font-weight: bold;
+        }
+        .action-btn:active { transform: scale(0.97); }
+        .action-btn.start { background: #0f3460; color: #ffd700; border-color: #ffd700; }
+        
         .video-container {
             background: #000;
             padding: 15px;
@@ -110,14 +125,18 @@
         }
         .audio-mode-indicator {
             background: #1a1a2e;
-            padding: 20px;
+            padding: 30px;
             text-align: center;
             border: 2px solid #ffd700;
             border-radius: 15px;
-            margin: 10px;
+            margin: 15px;
+            display: none;
+        }
+        .audio-mode-indicator.active {
+            display: block;
         }
         .audio-mode-indicator span {
-            font-size: 48px;
+            font-size: 64px;
         }
         .audio-mode-indicator p {
             color: #ffd700;
@@ -157,14 +176,20 @@
             <button class="connect-btn" id="connectBtn">🔮 CONNECT TO MONITOR 🔮</button>
         </div>
         
-        <div class="mode-controls">
+        <div class="action-controls">
+            <button class="action-btn start" id="startVideoBtn" disabled>📹 START VIDEO</button>
+            <button class="action-btn start" id="startAudioBtn" disabled>🎙️ START AUDIO</button>
+            <button class="action-btn" id="endCallBtn" disabled>🔴 END CALL</button>
+        </div>
+        
+        <div class="mode-controls" id="modeControls" style="display: none;">
             <button class="mode-btn" id="videoModeBtn">📹 VIDEO MODE</button>
             <button class="mode-btn" id="audioModeBtn">🎙️ AUDIO ONLY</button>
         </div>
         
-        <div class="camera-controls" id="cameraControls">
-            <button class="camera-btn" id="frontCameraBtn" disabled>📱 FRONT CAMERA</button>
-            <button class="camera-btn" id="backCameraBtn" disabled>📷 BACK CAMERA</button>
+        <div class="camera-controls" id="cameraControls" style="display: none;">
+            <button class="camera-btn" id="frontCameraBtn">📱 FRONT CAMERA</button>
+            <button class="camera-btn" id="backCameraBtn">📷 BACK CAMERA</button>
         </div>
         
         <div class="status-text" id="callStatus">⚫ Ready - Connect to monitor first</div>
@@ -176,7 +201,7 @@
             </div>
         </div>
         
-        <div class="audio-mode-indicator" id="audioIndicator" style="display: none;">
+        <div class="audio-mode-indicator" id="audioIndicator">
             <span>🎙️</span>
             <p>Audio Only Mode - Listening to monitor</p>
         </div>
@@ -201,14 +226,19 @@
         let conn = null;
         let mediaCall = null;
         let currentCamera = 'front';
-        let currentMode = 'video';
+        let currentMode = null;
         let keepAliveInterval = null;
 
         const connectBtn        = document.getElementById('connectBtn');
+        const startVideoBtn     = document.getElementById('startVideoBtn');
+        const startAudioBtn     = document.getElementById('startAudioBtn');
+        const endCallBtn        = document.getElementById('endCallBtn');
         const videoModeBtn      = document.getElementById('videoModeBtn');
         const audioModeBtn      = document.getElementById('audioModeBtn');
         const frontCameraBtn    = document.getElementById('frontCameraBtn');
         const backCameraBtn     = document.getElementById('backCameraBtn');
+        const modeControls      = document.getElementById('modeControls');
+        const cameraControls    = document.getElementById('cameraControls');
         const statusText        = document.getElementById('statusText');
         const callStatus        = document.getElementById('callStatus');
         const videoContainer    = document.getElementById('videoContainer');
@@ -222,18 +252,22 @@
                 statusText.classList.add('connected');
                 connectBtn.innerText = '🌟 CONNECTED 🌟';
                 connectBtn.disabled = true;
-                frontCameraBtn.disabled = false;
-                backCameraBtn.disabled = false;
-                callStatus.innerText = '✅ Connected - Select mode';
+                startVideoBtn.disabled = false;
+                startAudioBtn.disabled = false;
+                callStatus.innerText = '✅ Connected - Choose VIDEO or AUDIO';
             } else {
                 statusText.innerText = '🔮 Monitor: Offline';
                 statusText.classList.remove('connected');
                 connectBtn.innerText = '🔮 CONNECT TO MONITOR 🔮';
                 connectBtn.disabled = false;
-                frontCameraBtn.disabled = true;
-                backCameraBtn.disabled = true;
+                startVideoBtn.disabled = true;
+                startAudioBtn.disabled = true;
+                endCallBtn.disabled = true;
+                modeControls.style.display = 'none';
+                cameraControls.style.display = 'none';
                 videoContainer.classList.remove('active');
-                audioIndicator.style.display = 'none';
+                audioIndicator.classList.remove('active');
+                currentMode = null;
             }
         }
 
@@ -256,51 +290,110 @@
             }, 15000);
         }
 
-        function setMode(mode) {
+        function endCall() {
+            console.log('[REMOTE] Ending call...');
+            
+            if (conn && conn.open) {
+                conn.send({ type: 'stop_all' });
+            }
+            
+            if (mediaCall) {
+                mediaCall.close();
+                mediaCall = null;
+            }
+            
+            monitorVideo.srcObject = null;
+            videoContainer.classList.remove('active');
+            audioIndicator.classList.remove('active');
+            modeControls.style.display = 'none';
+            cameraControls.style.display = 'none';
+            currentMode = null;
+            
+            startVideoBtn.disabled = false;
+            startAudioBtn.disabled = false;
+            endCallBtn.disabled = true;
+            
+            callStatus.innerText = '✅ Call ended - Select VIDEO or AUDIO';
+        }
+
+        function startVideo() {
             if (!conn || !conn.open) {
                 callStatus.innerText = '❌ Not connected';
                 return;
             }
             
-            currentMode = mode;
+            currentMode = 'video';
+            currentCamera = 'front';
             
-            // Update button active states
-            if (mode === 'video') {
-                videoModeBtn.classList.add('active');
-                audioModeBtn.classList.remove('active');
-                frontCameraBtn.disabled = false;
-                backCameraBtn.disabled = false;
-                callStatus.innerText = `⏳ Switching to VIDEO mode...`;
-            } else {
-                videoModeBtn.classList.remove('active');
-                audioModeBtn.classList.add('active');
-                frontCameraBtn.disabled = true;
-                backCameraBtn.disabled = true;
-                callStatus.innerText = `⏳ Switching to AUDIO mode...`;
+            startVideoBtn.disabled = true;
+            startAudioBtn.disabled = true;
+            endCallBtn.disabled = false;
+            modeControls.style.display = 'flex';
+            cameraControls.style.display = 'flex';
+            videoContainer.classList.add('active');
+            audioIndicator.classList.remove('active');
+            
+            frontCameraBtn.classList.add('active');
+            backCameraBtn.classList.remove('active');
+            videoModeBtn.classList.add('active');
+            audioModeBtn.classList.remove('active');
+            activeCameraLabel.innerHTML = '📱 MONITOR FRONT CAMERA';
+            
+            callStatus.innerText = `⏳ Starting VIDEO mode...`;
+            
+            conn.send({ type: 'start_video', camera: 'front' });
+        }
+        
+        function startAudio() {
+            if (!conn || !conn.open) {
+                callStatus.innerText = '❌ Not connected';
+                return;
             }
             
-            // Send command to monitor
-            conn.send({ 
-                type: 'switch_mode', 
-                mode: mode,
-                camera: currentCamera 
-            });
+            currentMode = 'audio';
+            
+            startVideoBtn.disabled = true;
+            startAudioBtn.disabled = true;
+            endCallBtn.disabled = false;
+            modeControls.style.display = 'flex';
+            cameraControls.style.display = 'none';
+            videoContainer.classList.remove('active');
+            audioIndicator.classList.add('active');
+            
+            videoModeBtn.classList.remove('active');
+            audioModeBtn.classList.add('active');
+            
+            callStatus.innerText = `⏳ Starting AUDIO mode...`;
+            
+            conn.send({ type: 'start_audio' });
+        }
+
+        function switchMode(mode) {
+            if (!conn || !conn.open) return;
+            
+            if (mode === 'video') {
+                // First end current, then start video
+                if (conn && conn.open) {
+                    conn.send({ type: 'stop_all' });
+                }
+                setTimeout(() => {
+                    conn.send({ type: 'start_video', camera: currentCamera });
+                }, 500);
+            } else if (mode === 'audio') {
+                if (conn && conn.open) {
+                    conn.send({ type: 'stop_all' });
+                }
+                setTimeout(() => {
+                    conn.send({ type: 'start_audio' });
+                }, 500);
+            }
         }
 
         function switchMonitorCamera(camera) {
-            if (!conn || !conn.open) {
-                callStatus.innerText = '❌ Not connected';
-                return;
-            }
-            
-            if (currentMode !== 'video') {
-                callStatus.innerText = '⚠️ Switch to VIDEO mode first';
-                return;
-            }
+            if (!conn || !conn.open || currentMode !== 'video') return;
             
             currentCamera = camera;
             
-            // Update button active states
             if (camera === 'front') {
                 frontCameraBtn.classList.add('active');
                 backCameraBtn.classList.remove('active');
@@ -313,15 +406,11 @@
             
             callStatus.innerText = `⏳ Switching to ${camera} camera...`;
             
-            // Send command to monitor
             conn.send({ type: 'switch_camera', camera: camera });
         }
 
         function handleIncomingCall(call) {
             console.log('[REMOTE] Incoming call from monitor');
-            callStatus.innerText = '📞 Receiving stream...';
-            
-            call.answer();
             
             if (mediaCall) {
                 monitorVideo.pause();
@@ -330,12 +419,12 @@
             }
             
             mediaCall = call;
+            call.answer();
             
             call.on('stream', (stream) => {
                 console.log('[REMOTE] Stream received, mode:', currentMode);
                 
                 if (currentMode === 'video') {
-                    // Video mode - show video
                     monitorVideo.pause();
                     monitorVideo.srcObject = null;
                     
@@ -343,27 +432,19 @@
                         monitorVideo.srcObject = stream;
                         monitorVideo.load();
                         monitorVideo.play().catch(e => console.log(e));
-                        console.log('[REMOTE] Video element updated');
                     }, 100);
                     
                     videoContainer.classList.add('active');
-                    audioIndicator.style.display = 'none';
+                    audioIndicator.classList.remove('active');
                     callStatus.innerText = `👁️ Monitoring ${currentCamera} camera LIVE`;
                     
-                } else {
-                    // Audio mode - hide video, show audio indicator
+                } else if (currentMode === 'audio') {
                     videoContainer.classList.remove('active');
-                    audioIndicator.style.display = 'block';
+                    audioIndicator.classList.add('active');
                     
-                    // Still need to play audio from the stream
-                    if (stream.getAudioTracks().length > 0) {
-                        // Audio will play automatically from the video element
-                        // But we need to attach it to something
-                        const audioElement = new Audio();
-                        audioElement.srcObject = stream;
-                        audioElement.play().catch(e => console.log('Audio play error:', e));
-                        console.log('[REMOTE] Audio playing');
-                    }
+                    const audioElement = new Audio();
+                    audioElement.srcObject = stream;
+                    audioElement.play().catch(e => console.log('Audio error:', e));
                     
                     callStatus.innerText = '🎙️ Audio Only - Listening to monitor';
                 }
@@ -371,15 +452,11 @@
             
             call.on('close', () => {
                 console.log('[REMOTE] Stream closed');
-                monitorVideo.srcObject = null;
-                videoContainer.classList.remove('active');
-                audioIndicator.style.display = 'none';
-                callStatus.innerText = '⚫ Stream stopped';
-            });
-            
-            call.on('error', (err) => {
-                console.error('[REMOTE] Call error:', err);
-                callStatus.innerText = '❌ Stream error';
+                if (currentMode !== 'audio' && currentMode !== 'video') {
+                    monitorVideo.srcObject = null;
+                    videoContainer.classList.remove('active');
+                    audioIndicator.classList.remove('active');
+                }
             });
         }
 
@@ -389,8 +466,7 @@
             
             conn.on('close', () => { 
                 setStatus(false); 
-                if (mediaCall) mediaCall.close();
-                mediaCall = null;
+                endCall();
             });
         }
 
@@ -431,8 +507,11 @@
         }
 
         connectBtn.addEventListener('click', connectToPartner);
-        videoModeBtn.addEventListener('click', () => setMode('video'));
-        audioModeBtn.addEventListener('click', () => setMode('audio'));
+        startVideoBtn.addEventListener('click', startVideo);
+        startAudioBtn.addEventListener('click', startAudio);
+        endCallBtn.addEventListener('click', endCall);
+        videoModeBtn.addEventListener('click', () => switchMode('video'));
+        audioModeBtn.addEventListener('click', () => switchMode('audio'));
         frontCameraBtn.addEventListener('click', () => switchMonitorCamera('front'));
         backCameraBtn.addEventListener('click', () => switchMonitorCamera('back'));
 
