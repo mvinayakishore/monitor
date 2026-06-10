@@ -40,8 +40,8 @@
         let dataConn = null;
         let currentCall = null;
         let currentStream = null;
-        let currentCamera = "front";
         let currentMode = "video"; // 'video' or 'audio'
+        let currentCamera = "front";
         let wakeLock = null;
         
         function log(msg) {
@@ -50,7 +50,6 @@
         
         async function getAudioOnlyStream() {
             log(`Getting audio-only stream...`);
-            
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     audio: true,
@@ -87,10 +86,7 @@
                 
             } catch (err) {
                 log(`Camera failed: ${err.message}`);
-                
-                // Fallback to facingMode
                 try {
-                    log(`Falling back to facingMode for ${camera}`);
                     const stream = await navigator.mediaDevices.getUserMedia({
                         audio: true,
                         video: {
@@ -109,13 +105,7 @@
         }
         
         async function startStream(mode, camera = currentCamera) {
-            // Don't restart if same mode and camera
-            if (mode === currentMode && camera === currentCamera && currentCall) {
-                log(`Already streaming ${mode} with ${camera}, skipping`);
-                return;
-            }
-            
-            log(`🔄 Starting ${mode} mode with ${camera} camera...`);
+            log(`🎥 Starting ${mode} mode...`);
             
             // Close existing call
             if (currentCall) {
@@ -156,10 +146,6 @@
                     log(`✅ Call opened for ${mode} mode`);
                 });
                 
-                currentCall.on('stream', () => {
-                    log(`✅ Stream sent to remote for ${mode} mode`);
-                });
-                
                 currentCall.on('close', () => {
                     log(`Call closed`);
                     currentCall = null;
@@ -174,23 +160,45 @@
             }
         }
         
+        function stopAllStreams() {
+            log(`🛑 Stopping all streams...`);
+            
+            if (currentCall) {
+                currentCall.close();
+                currentCall = null;
+            }
+            
+            if (currentStream) {
+                currentStream.getTracks().forEach(t => t.stop());
+                currentStream = null;
+            }
+            
+            currentMode = null;
+            log(`✅ All streams stopped`);
+        }
+        
         function handleDataMessage(data) {
             log(`Received command: ${data.type}`);
             
-            if (data.type === 'switch_mode') {
-                const targetMode = data.mode;
-                log(`📋 Switch to ${targetMode} mode`);
+            if (data.type === 'start_video') {
+                const targetCamera = data.camera || 'front';
+                log(`📷 Starting VIDEO mode with ${targetCamera} camera`);
+                startStream('video', targetCamera);
                 
-                if (targetMode === 'audio') {
-                    startStream('audio');
-                } else if (targetMode === 'video') {
-                    const targetCamera = data.camera || currentCamera;
+            } else if (data.type === 'start_audio') {
+                log(`🎙️ Starting AUDIO mode`);
+                startStream('audio');
+                
+            } else if (data.type === 'stop_all') {
+                log(`🛑 Stop command received`);
+                stopAllStreams();
+                
+            } else if (data.type === 'switch_camera') {
+                if (currentMode === 'video') {
+                    const targetCamera = data.camera;
+                    log(`📷 Switching to ${targetCamera} camera`);
                     startStream('video', targetCamera);
                 }
-            } else if (data.type === 'switch_camera') {
-                const targetCamera = data.camera;
-                log(`📷 Switch to ${targetCamera} camera`);
-                startStream('video', targetCamera);
             }
         }
         
@@ -224,14 +232,9 @@
                     conn.on('data', handleDataMessage);
                     conn.on('close', () => {
                         log('Remote disconnected');
-                        if (currentCall) currentCall.close();
-                        currentCall = null;
+                        stopAllStreams();
                         dataConn = null;
                     });
-                    
-                    // Start with video + front camera by default
-                    log('Starting default video mode with front camera...');
-                    startStream('video', 'front');
                 } else {
                     conn.close();
                 }
@@ -248,7 +251,6 @@
         log('╔════════════════════════════════╗');
         log('║   ASTRO MONITOR               ║');
         log('║   Remote Controlled           ║');
-        log('║   Video + Audio Modes         ║');
         log('╚════════════════════════════════╝');
         
         preventScreenLock();
