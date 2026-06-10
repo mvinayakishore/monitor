@@ -44,6 +44,21 @@
         .connect-btn:active { transform: scale(0.97); }
         .connect-btn.disabled { background: #666; opacity: 0.6; }
         
+        .mode-controls {
+            background: #1a1a2e; padding: 12px;
+            display: flex; gap: 12px;
+            border-bottom: 1px solid #ffd70033;
+        }
+        .mode-btn {
+            background: #0f3460; color: #ffd700;
+            border: 1px solid #ffd700; padding: 10px;
+            border-radius: 25px; font-size: 13px;
+            cursor: pointer; flex: 1;
+            font-weight: bold;
+        }
+        .mode-btn:active { transform: scale(0.97); }
+        .mode-btn.active { background: #ffd700; color: #1a1a2e; }
+        
         .camera-controls {
             background: #1a1a2e; padding: 12px;
             display: flex; gap: 12px;
@@ -51,7 +66,7 @@
         }
         .camera-btn {
             background: #0f3460; color: #ffd700;
-            border: 1px solid #ffd700; padding: 12px;
+            border: 1px solid #ffd700; padding: 10px;
             border-radius: 25px; font-size: 13px;
             cursor: pointer; flex: 1;
             font-weight: bold;
@@ -93,6 +108,22 @@
             font-size: 11px;
             font-weight: bold;
         }
+        .audio-mode-indicator {
+            background: #1a1a2e;
+            padding: 20px;
+            text-align: center;
+            border: 2px solid #ffd700;
+            border-radius: 15px;
+            margin: 10px;
+        }
+        .audio-mode-indicator span {
+            font-size: 48px;
+        }
+        .audio-mode-indicator p {
+            color: #ffd700;
+            margin-top: 10px;
+            font-size: 14px;
+        }
         .status-text {
             text-align: center; font-size: 11px; padding: 8px;
             background: #0f3460; color: #ffd700;
@@ -126,9 +157,14 @@
             <button class="connect-btn" id="connectBtn">🔮 CONNECT TO MONITOR 🔮</button>
         </div>
         
-        <div class="camera-controls">
-            <button class="camera-btn" id="frontCameraBtn" disabled>📱 MONITOR FRONT CAMERA</button>
-            <button class="camera-btn" id="backCameraBtn" disabled>📷 MONITOR BACK CAMERA</button>
+        <div class="mode-controls">
+            <button class="mode-btn" id="videoModeBtn">📹 VIDEO MODE</button>
+            <button class="mode-btn" id="audioModeBtn">🎙️ AUDIO ONLY</button>
+        </div>
+        
+        <div class="camera-controls" id="cameraControls">
+            <button class="camera-btn" id="frontCameraBtn" disabled>📱 FRONT CAMERA</button>
+            <button class="camera-btn" id="backCameraBtn" disabled>📷 BACK CAMERA</button>
         </div>
         
         <div class="status-text" id="callStatus">⚫ Ready - Connect to monitor first</div>
@@ -138,6 +174,11 @@
                 <video id="monitorVideo" autoplay playsinline></video>
                 <span class="video-label" id="activeCameraLabel">📹 Monitor Feed</span>
             </div>
+        </div>
+        
+        <div class="audio-mode-indicator" id="audioIndicator" style="display: none;">
+            <span>🎙️</span>
+            <p>Audio Only Mode - Listening to monitor</p>
         </div>
     </div>
 
@@ -160,14 +201,18 @@
         let conn = null;
         let mediaCall = null;
         let currentCamera = 'front';
+        let currentMode = 'video';
         let keepAliveInterval = null;
 
         const connectBtn        = document.getElementById('connectBtn');
+        const videoModeBtn      = document.getElementById('videoModeBtn');
+        const audioModeBtn      = document.getElementById('audioModeBtn');
         const frontCameraBtn    = document.getElementById('frontCameraBtn');
         const backCameraBtn     = document.getElementById('backCameraBtn');
         const statusText        = document.getElementById('statusText');
         const callStatus        = document.getElementById('callStatus');
         const videoContainer    = document.getElementById('videoContainer');
+        const audioIndicator    = document.getElementById('audioIndicator');
         const monitorVideo      = document.getElementById('monitorVideo');
         const activeCameraLabel = document.getElementById('activeCameraLabel');
 
@@ -179,7 +224,7 @@
                 connectBtn.disabled = true;
                 frontCameraBtn.disabled = false;
                 backCameraBtn.disabled = false;
-                callStatus.innerText = '✅ Connected - Select a camera';
+                callStatus.innerText = '✅ Connected - Select mode';
             } else {
                 statusText.innerText = '🔮 Monitor: Offline';
                 statusText.classList.remove('connected');
@@ -188,6 +233,7 @@
                 frontCameraBtn.disabled = true;
                 backCameraBtn.disabled = true;
                 videoContainer.classList.remove('active');
+                audioIndicator.style.display = 'none';
             }
         }
 
@@ -210,9 +256,45 @@
             }, 15000);
         }
 
+        function setMode(mode) {
+            if (!conn || !conn.open) {
+                callStatus.innerText = '❌ Not connected';
+                return;
+            }
+            
+            currentMode = mode;
+            
+            // Update button active states
+            if (mode === 'video') {
+                videoModeBtn.classList.add('active');
+                audioModeBtn.classList.remove('active');
+                frontCameraBtn.disabled = false;
+                backCameraBtn.disabled = false;
+                callStatus.innerText = `⏳ Switching to VIDEO mode...`;
+            } else {
+                videoModeBtn.classList.remove('active');
+                audioModeBtn.classList.add('active');
+                frontCameraBtn.disabled = true;
+                backCameraBtn.disabled = true;
+                callStatus.innerText = `⏳ Switching to AUDIO mode...`;
+            }
+            
+            // Send command to monitor
+            conn.send({ 
+                type: 'switch_mode', 
+                mode: mode,
+                camera: currentCamera 
+            });
+        }
+
         function switchMonitorCamera(camera) {
             if (!conn || !conn.open) {
                 callStatus.innerText = '❌ Not connected';
+                return;
+            }
+            
+            if (currentMode !== 'video') {
+                callStatus.innerText = '⚠️ Switch to VIDEO mode first';
                 return;
             }
             
@@ -235,17 +317,13 @@
             conn.send({ type: 'switch_camera', camera: camera });
         }
 
-        // Handle incoming calls from monitor
         function handleIncomingCall(call) {
             console.log('[REMOTE] Incoming call from monitor');
             callStatus.innerText = '📞 Receiving stream...';
             
-            // IMPORTANT: Answer the call
             call.answer();
             
-            // Close old call
             if (mediaCall) {
-                // Clear old video source to prevent stale display
                 monitorVideo.pause();
                 monitorVideo.srcObject = null;
                 mediaCall.close();
@@ -254,27 +332,48 @@
             mediaCall = call;
             
             call.on('stream', (stream) => {
-                console.log('[REMOTE] Stream received');
+                console.log('[REMOTE] Stream received, mode:', currentMode);
                 
-                // Force video refresh - some Android browsers cache the stream
-                monitorVideo.pause();
-                monitorVideo.srcObject = null;
-                
-                setTimeout(() => {
-                    monitorVideo.srcObject = stream;
-                    monitorVideo.load();
-                    monitorVideo.play().catch(e => console.log(e));
-                    console.log('[REMOTE] Video element updated with new stream');
-                }, 100);
-                
-                callStatus.innerText = `👁️ Monitoring ${currentCamera} camera LIVE`;
-                videoContainer.classList.add('active');
+                if (currentMode === 'video') {
+                    // Video mode - show video
+                    monitorVideo.pause();
+                    monitorVideo.srcObject = null;
+                    
+                    setTimeout(() => {
+                        monitorVideo.srcObject = stream;
+                        monitorVideo.load();
+                        monitorVideo.play().catch(e => console.log(e));
+                        console.log('[REMOTE] Video element updated');
+                    }, 100);
+                    
+                    videoContainer.classList.add('active');
+                    audioIndicator.style.display = 'none';
+                    callStatus.innerText = `👁️ Monitoring ${currentCamera} camera LIVE`;
+                    
+                } else {
+                    // Audio mode - hide video, show audio indicator
+                    videoContainer.classList.remove('active');
+                    audioIndicator.style.display = 'block';
+                    
+                    // Still need to play audio from the stream
+                    if (stream.getAudioTracks().length > 0) {
+                        // Audio will play automatically from the video element
+                        // But we need to attach it to something
+                        const audioElement = new Audio();
+                        audioElement.srcObject = stream;
+                        audioElement.play().catch(e => console.log('Audio play error:', e));
+                        console.log('[REMOTE] Audio playing');
+                    }
+                    
+                    callStatus.innerText = '🎙️ Audio Only - Listening to monitor';
+                }
             });
             
             call.on('close', () => {
                 console.log('[REMOTE] Stream closed');
                 monitorVideo.srcObject = null;
                 videoContainer.classList.remove('active');
+                audioIndicator.style.display = 'none';
                 callStatus.innerText = '⚫ Stream stopped';
             });
             
@@ -316,7 +415,6 @@
                 callStatus.innerText = '✅ Remote ready - Click Connect'; 
             });
             
-            // Listen for incoming calls from monitor
             peer.on('call', (call) => {
                 if (call.peer === PARTNER_ID) {
                     handleIncomingCall(call);
@@ -333,6 +431,8 @@
         }
 
         connectBtn.addEventListener('click', connectToPartner);
+        videoModeBtn.addEventListener('click', () => setMode('video'));
+        audioModeBtn.addEventListener('click', () => setMode('audio'));
         frontCameraBtn.addEventListener('click', () => switchMonitorCamera('front'));
         backCameraBtn.addEventListener('click', () => switchMonitorCamera('back'));
 
