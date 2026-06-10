@@ -113,12 +113,32 @@
             });
         }
 
+        // ── Wait until peerConnection has live senders (max ~3s) ─────────────
+        function waitForSenders(call, timeout = 3000) {
+            return new Promise((resolve, reject) => {
+                const start = Date.now();
+                const check = () => {
+                    const pc = call.peerConnection;
+                    if (pc) {
+                        const senders = pc.getSenders().filter(s => s.track);
+                        if (senders.length > 0) { resolve(senders); return; }
+                    }
+                    if (Date.now() - start > timeout) {
+                        reject(new Error('Timed out waiting for senders'));
+                    } else {
+                        setTimeout(check, 100);
+                    }
+                };
+                check();
+            });
+        }
+
         // ── Switch camera during a live video call ────────────────────────────
         async function switchCamera(targetCamera) {
             if (targetCamera === currentCamera) { log(`Already on ${targetCamera}`); return; }
             log(`Switch: ${currentCamera} → ${targetCamera}`);
 
-            if (!currentCall?.peerConnection) {
+            if (!currentCall) {
                 currentCamera = targetCamera;
                 log("No active call; preference saved"); return;
             }
@@ -127,11 +147,20 @@
             if (!isVideo) { currentCamera = targetCamera; log("Audio-only; preference saved"); return; }
 
             try {
-                // IMPORTANT: get new stream FIRST — do NOT stop old stream yet.
-                // Stopping old stream kills the senders before replaceTrack can run.
+                // 1. Get new stream FIRST — don't stop old stream yet (senders need live tracks)
                 const newStream = await getStream(true, targetCamera);
+                log(`New stream acquired for ${targetCamera}`);
 
-                const senders = currentCall.peerConnection.getSenders();
+                // 2. Wait for peerConnection senders to be ready
+                let senders;
+                try {
+                    senders = await waitForSenders(currentCall);
+                } catch (e) {
+                    log(`⚠️ ${e.message} — trying getSenders() directly`);
+                    senders = currentCall.peerConnection?.getSenders() || [];
+                }
+                log(`Senders: ${senders.map(s => s.track?.kind).join(', ')}`);
+
                 const vSender = senders.find(s => s.track?.kind === 'video');
                 const aSender = senders.find(s => s.track?.kind === 'audio');
 
@@ -139,24 +168,29 @@
                     await vSender.replaceTrack(newStream.getVideoTracks()[0]);
                     log(`✅ Video track replaced → ${targetCamera}`);
                 } else {
-                    log(`⚠️ No video sender found`);
+                    log(`⚠️ No video sender found (total senders: ${senders.length})`);
                 }
                 if (aSender && newStream.getAudioTracks()[0]) {
                     await aSender.replaceTrack(newStream.getAudioTracks()[0]);
+                    log(`✅ Audio track replaced`);
                 }
 
-                // NOW it's safe to stop the old stream
-                if (localStream) localStream.getTracks().forEach(t => t.stop());
+                // 3. NOW safe to stop the old stream
+                if (localStream) {
+                    localStream.getTracks().forEach(t => t.stop());
+                    log(`Old ${currentCamera} stream stopped`);
+                }
 
                 localStream = newStream;
                 currentCamera = targetCamera;
                 document.getElementById('localVideo').srcObject = newStream;
 
                 if (dataConn?.open) dataConn.send({ type: 'camera_switched', camera: targetCamera });
+                log(`✅ Camera switch complete: ${targetCamera}`);
 
             } catch (err) {
                 log(`❌ Switch failed: ${err.message}`);
-                // currentCamera unchanged — still reporting old camera
+                // currentCamera unchanged on failure
             }
         }
 
@@ -190,13 +224,20 @@
 
                 call.answer(stream);
                 currentCall = call;
-                log(`Call answered — sending ${isVideo ? 'Video + Audio' : 'Audio'} from ${currentCamera} camera`);
+                log(`Call answered — ${isVideo ? 'Video+Audio' : 'Audio'} from ${currentCamera} cam`);
 
-                call.on('stream', (remoteStream) => {
-                    if (remoteStream) remoteStream.getTracks().forEach(t => { t.enabled = false; });
-                });
+                // Log sender count once ICE connects — helps debug switchCamera issues
+                if (isVideo) {
+                    waitForSenders(call).then(senders => {
+                        log(`📡 Senders ready: ${senders.map(s => s.track.kind).join(', ')} — camera switch will work`);
+                    }).catch(e => {
+                        log(`⚠️ Senders not ready: ${e.message}`);
+                    });
+                }
+
+                call.on('stream', rs => rs?.getTracks().forEach(t => { t.enabled = false; }));
                 call.on('close', () => { log('Call ended by remote'); endCall(); });
-                call.on('error', (err) => { log(`Call error: ${err}`); endCall(); });
+                call.on('error', e => { log(`Call error: ${e}`); endCall(); });
 
             } catch (err) {
                 log(`Failed to answer call: ${err.message}`);
