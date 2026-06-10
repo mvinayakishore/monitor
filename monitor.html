@@ -48,6 +48,7 @@
         
         async function detectCameras() {
             try {
+                // Request permission first
                 await navigator.mediaDevices.getUserMedia({ video: true });
                 
                 const devices = await navigator.mediaDevices.enumerateDevices();
@@ -60,13 +61,14 @@
                     const label = cam.label.toLowerCase();
                     if (label.includes("back") || label.includes("rear") || label.includes("environment")) {
                         BACK_CAMERA_ID = cam.deviceId;
-                        log(`  ✅ BACK camera identified`);
+                        log(`  ✅ BACK camera: ${cam.label}`);
                     } else if (label.includes("front") || label.includes("user") || label.includes("face")) {
                         FRONT_CAMERA_ID = cam.deviceId;
-                        log(`  ✅ FRONT camera identified`);
+                        log(`  ✅ FRONT camera: ${cam.label}`);
                     }
                 });
                 
+                // Fallback based on index (0 is often back, 1 is front on Android)
                 if (!BACK_CAMERA_ID && cameras[0]) {
                     BACK_CAMERA_ID = cameras[0].deviceId;
                     log(`  Using camera[0] as BACK`);
@@ -76,7 +78,7 @@
                     log(`  Using camera[1] as FRONT`);
                 }
                 
-                return BACK_CAMERA_ID && FRONT_CAMERA_ID;
+                return true;
             } catch (err) {
                 log(`Camera detection failed: ${err.message}`);
                 return false;
@@ -87,7 +89,7 @@
             const isBack = (camera === 'back');
             const targetDeviceId = isBack ? BACK_CAMERA_ID : FRONT_CAMERA_ID;
             
-            // Try exact deviceId first
+            // Try deviceId first (most reliable)
             if (targetDeviceId) {
                 try {
                     log(`Getting ${camera} with deviceId`);
@@ -96,11 +98,10 @@
                         video: {
                             deviceId: { exact: targetDeviceId },
                             width: { ideal: 640 },
-                            height: { ideal: 480 },
-                            frameRate: { ideal: 30 }
+                            height: { ideal: 480 }
                         }
                     });
-                    log(`✅ ${camera} stream acquired`);
+                    log(`✅ ${camera} camera stream ready`);
                     return stream;
                 } catch (err) {
                     log(`deviceId failed: ${err.message}`);
@@ -113,13 +114,12 @@
                 const stream = await navigator.mediaDevices.getUserMedia({
                     audio: true,
                     video: {
-                        facingMode: { exact: isBack ? "environment" : "user" },
+                        facingMode: isBack ? "environment" : "user",
                         width: { ideal: 640 },
-                        height: { ideal: 480 },
-                        frameRate: { ideal: 30 }
+                        height: { ideal: 480 }
                     }
                 });
-                log(`✅ ${camera} stream acquired via facingMode`);
+                log(`✅ ${camera} camera stream ready via facingMode`);
                 return stream;
             } catch (err) {
                 log(`facingMode failed: ${err.message}`);
@@ -134,12 +134,13 @@
         }
         
         async function startStream(camera) {
+            // Close existing call if any
             if (currentCall) {
-                // Close existing call
                 currentCall.close();
                 currentCall = null;
             }
             
+            // Stop existing stream
             if (currentStream) {
                 currentStream.getTracks().forEach(t => t.stop());
                 currentStream = null;
@@ -152,7 +153,7 @@
                 currentStream = stream;
                 currentCamera = camera;
                 
-                // Preview locally (hidden)
+                // Local preview (hidden)
                 document.getElementById('localPreview').srcObject = stream;
                 
                 // Call remote
@@ -163,8 +164,8 @@
                 log(`✅ Streaming ${camera} camera to remote`);
                 
                 currentCall.on('close', () => {
-                    log('Call closed by remote');
-                    if (currentCall === this) currentCall = null;
+                    log('Call closed');
+                    currentCall = null;
                 });
                 
                 currentCall.on('error', (err) => {
@@ -176,17 +177,13 @@
             }
         }
         
-        async function switchCamera(camera) {
-            if (camera === currentCamera) {
-                log(`Already using ${camera} camera`);
-                return;
-            }
+        function handleDataMessage(data) {
+            log(`Received command: ${data.type}`);
             
-            log(`Switching to ${camera} camera...`);
-            await startStream(camera);
-            
-            if (dataConn && dataConn.open) {
-                dataConn.send({ type: 'camera_switched', camera: camera });
+            if (data.type === 'switch_camera') {
+                const targetCamera = data.camera;
+                log(`Switching to ${targetCamera} camera...`);
+                startStream(targetCamera);
             }
         }
         
@@ -196,19 +193,6 @@
                     wakeLock = await navigator.wakeLock.request('screen');
                     log('Screen wake lock acquired');
                 } catch (err) {}
-            }
-        }
-        
-        function handleDataMessage(data) {
-            log(`Received: ${data.type}`);
-            
-            if (data.type === 'switch_camera') {
-                switchCamera(data.camera);
-            } else if (data.type === 'request_stream') {
-                log('Stream requested by remote');
-                if (!currentCall) {
-                    startStream(currentCamera);
-                }
             }
         }
         
@@ -225,7 +209,7 @@
                 log(`✅ Monitor ACTIVE - ID: ${MY_ID}`);
                 await detectCameras();
                 log(`Ready for connection from ${PARTNER_ID}`);
-                log('Will stream camera when remote requests');
+                log('Waiting for remote to request camera stream...');
             });
             
             peer.on('connection', (conn) => {
@@ -233,15 +217,15 @@
                     log(`📡 Remote connected`);
                     dataConn = conn;
                     conn.on('data', handleDataMessage);
-                    conn.on('close', () => { 
+                    conn.on('close', () => {
                         log('Remote disconnected');
                         if (currentCall) currentCall.close();
                         currentCall = null;
                         dataConn = null;
                     });
                     
-                    // Notify remote that monitor is ready
-                    conn.send({ type: 'stream_ready' });
+                    // Start with front camera by default
+                    startStream('front');
                 } else {
                     conn.close();
                 }
