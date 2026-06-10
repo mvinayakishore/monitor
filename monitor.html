@@ -69,7 +69,7 @@
                     }
                 });
                 
-                // Fallback
+                // Fallback based on your debug output
                 if (!BACK_CAMERA_ID && cameras[0]) {
                     BACK_CAMERA_ID = cameras[0].deviceId;
                     log(`  Using camera[0] as BACK`);
@@ -106,7 +106,9 @@
                             height: { ideal: 480 }
                         }
                     });
-                    log(`✅ ${camera} camera acquired`);
+                    const track = stream.getVideoTracks()[0];
+                    const settings = track.getSettings();
+                    log(`✅ ${camera} camera acquired - facingMode: ${settings.facingMode}, label: ${track.label}`);
                     return stream;
                 } catch (err) {
                     log(`deviceId failed: ${err.message}`);
@@ -124,20 +126,23 @@
                         height: { ideal: 480 }
                     }
                 });
-                log(`✅ ${camera} camera acquired via facingMode`);
+                const track = stream.getVideoTracks()[0];
+                const settings = track.getSettings();
+                log(`✅ ${camera} camera acquired via facingMode - facingMode: ${settings.facingMode}`);
                 return stream;
             } catch (err) {
                 log(`facingMode failed: ${err.message}`);
             }
             
             // Final fallback
+            log(`Using default camera for ${camera}`);
             return await navigator.mediaDevices.getUserMedia({
                 audio: true,
                 video: { width: { ideal: 640 }, height: { ideal: 480 } }
             });
         }
         
-        // Switch camera during active call
+        // Switch camera - simplified without renegotiation
         async function switchCamera(targetCamera) {
             if (targetCamera === currentCamera) {
                 log(`Already using ${targetCamera}`);
@@ -149,45 +154,49 @@
                 return;
             }
             
+            const isVideo = (currentCall.metadata?.type || 'voice') === 'video';
+            
+            if (!isVideo) {
+                currentCamera = targetCamera;
+                if (dataConn) dataConn.send({ type: 'camera_switched', camera: targetCamera });
+                return;
+            }
+            
             log(`🔄 Switching to ${targetCamera.toUpperCase()} camera...`);
             
             try {
-                const isVideo = (currentCall.metadata?.type || 'voice') === 'video';
-                
-                if (!isVideo) {
-                    currentCamera = targetCamera;
-                    if (dataConn) dataConn.send({ type: 'camera_switched', camera: targetCamera });
-                    return;
-                }
-                
+                // Get new stream with desired camera
                 const newStream = await getStreamForCamera(targetCamera, true);
                 const newVideoTrack = newStream.getVideoTracks()[0];
                 
                 if (!newVideoTrack) throw new Error('No video track');
                 
+                // Log the new track settings
+                const newSettings = newVideoTrack.getSettings();
+                log(`NEW CAMERA: ${newSettings.facingMode}, label: ${newVideoTrack.label}`);
+                
                 const pc = currentCall.peerConnection;
                 if (!pc) throw new Error('No peer connection');
                 
+                // Find and replace video sender
                 const senders = pc.getSenders();
-                let videoSender = senders.find(s => s.track && s.track.kind === 'video');
+                const videoSender = senders.find(s => s.track && s.track.kind === 'video');
                 
                 if (videoSender) {
                     await videoSender.replaceTrack(newVideoTrack);
-                    log(`Video track replaced`);
-                    
-                    // Force negotiation
-                    const offer = await pc.createOffer();
-                    await pc.setLocalDescription(offer);
+                    log(`Video track replaced - NOW USING: ${targetCamera} (${newSettings.facingMode})`);
                 } else {
                     pc.addTrack(newVideoTrack, newStream);
-                    log(`Added new video track`);
+                    log(`Added new video track - NOW USING: ${targetCamera}`);
                 }
                 
+                // Update audio track if needed
                 const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
                 if (audioSender && newStream.getAudioTracks()[0]) {
                     await audioSender.replaceTrack(newStream.getAudioTracks()[0]);
                 }
                 
+                // Clean up old stream
                 if (localStream && localStream !== newStream) {
                     localStream.getTracks().forEach(t => t.stop());
                 }
@@ -196,11 +205,16 @@
                 currentCamera = targetCamera;
                 document.getElementById('localVideo').srcObject = newStream;
                 
-                log(`✅ Switched to ${targetCamera.toUpperCase()}`);
-                
+                // Send confirmation with facingMode info
                 if (dataConn && dataConn.open) {
-                    dataConn.send({ type: 'camera_switched', camera: targetCamera });
+                    dataConn.send({ 
+                        type: 'camera_switched', 
+                        camera: targetCamera,
+                        facingMode: newSettings.facingMode
+                    });
                 }
+                
+                log(`✅ Switch to ${targetCamera.toUpperCase()} complete`);
                 
             } catch (err) {
                 log(`Switch failed: ${err.message}`);
@@ -227,6 +241,9 @@
                 localStream = stream;
                 
                 if (isVideo && stream.getVideoTracks().length > 0) {
+                    const track = stream.getVideoTracks()[0];
+                    const settings = track.getSettings();
+                    log(`Initial camera: ${settings.facingMode}, label: ${track.label}`);
                     document.getElementById('localVideo').srcObject = stream;
                 }
                 
