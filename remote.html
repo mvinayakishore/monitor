@@ -229,24 +229,32 @@
                 activeCameraLabel.innerHTML = '📷 MONITOR BACK CAMERA';
             }
             
-            callStatus.innerText = `📡 Switching to ${camera} camera...`;
-            videoContainer.classList.add('active');
+            callStatus.innerText = `⏳ Switching to ${camera} camera...`;
             
             // Send command to monitor
             conn.send({ type: 'switch_camera', camera: camera });
         }
 
+        // IMPORTANT: Must answer incoming calls!
         function handleIncomingCall(call) {
-            console.log('[REMOTE] Receiving stream from monitor');
+            console.log('[REMOTE] Incoming call from monitor');
+            callStatus.innerText = '📞 Receiving stream...';
             
-            if (mediaCall) mediaCall.close();
+            // Answer the call - THIS IS CRITICAL!
+            call.answer();
+            
+            if (mediaCall) {
+                mediaCall.close();
+            }
+            
             mediaCall = call;
             
             call.on('stream', (stream) => {
+                console.log('[REMOTE] Stream received');
                 monitorVideo.srcObject = stream;
                 monitorVideo.play().catch(e => console.log(e));
-                console.log('[REMOTE] Stream active');
                 callStatus.innerText = `👁️ Monitoring ${currentCamera} camera LIVE`;
+                videoContainer.classList.add('active');
             });
             
             call.on('close', () => {
@@ -254,6 +262,11 @@
                 monitorVideo.srcObject = null;
                 videoContainer.classList.remove('active');
                 callStatus.innerText = '⚫ Stream stopped';
+            });
+            
+            call.on('error', (err) => {
+                console.error('[REMOTE] Call error:', err);
+                callStatus.innerText = '❌ Stream error';
             });
         }
 
@@ -289,6 +302,7 @@
                 callStatus.innerText = '✅ Remote ready - Click Connect'; 
             });
             
+            // Listen for incoming calls from monitor
             peer.on('call', (call) => {
                 if (call.peer === PARTNER_ID) {
                     handleIncomingCall(call);
