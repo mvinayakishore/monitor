@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Astro Remote - Dual Camera View</title>
+    <title>Astro Remote - Chat & Camera Test</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -19,7 +19,7 @@
         .star { position: absolute; background: white; border-radius: 50%; opacity: 0.8; animation: twinkle 3s infinite; }
         @keyframes twinkle { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
         .container {
-            max-width: 650px; width: 100%;
+            max-width: 500px; width: 100%;
             background: rgba(255,255,255,0.95);
             border-radius: 30px; overflow: hidden;
             box-shadow: 0 20px 40px rgba(0,0,0,0.3);
@@ -37,88 +37,115 @@
         .connect-section { background: #1a1a2e; padding: 12px; text-align: center; border-bottom: 1px solid #ffd70033; }
         .connect-btn {
             background: linear-gradient(135deg, #ffd700 0%, #ffb347 100%);
-            color: #1a1a2e; border: none; padding: 10px 24px;
-            border-radius: 25px; font-size: 14px; font-weight: bold;
+            color: #1a1a2e; border: none; padding: 8px 20px;
+            border-radius: 25px; font-size: 12px; font-weight: bold;
             cursor: pointer; font-family: monospace;
         }
         .connect-btn:active { transform: scale(0.97); }
         .connect-btn.disabled { background: #666; opacity: 0.6; }
-        .call-controls {
-            background: #1a1a2e; padding: 12px;
-            display: flex; gap: 10px; justify-content: center;
-            flex-wrap: wrap;
+        
+        .camera-controls {
+            background: #1a1a2e; padding: 10px;
+            display: flex; gap: 10px;
             border-bottom: 1px solid #ffd70033;
         }
-        .call-btn {
-            background: #2c3e50; color: #ffd700;
-            border: 1px solid #ffd700; padding: 10px 20px;
-            border-radius: 25px; font-size: 13px; font-weight: bold;
-            cursor: pointer; font-family: monospace;
+        .camera-btn {
+            background: #0f3460; color: #ffd700;
+            border: 1px solid #ffd700; padding: 8px;
+            border-radius: 20px; font-size: 11px;
+            cursor: pointer; flex: 1; font-family: monospace;
         }
-        .call-btn:active { transform: scale(0.97); }
-        .call-btn.end { background: #5a1e1e; border-color: #ff6b6b; color: #ff6b6b; }
-        .call-btn:disabled { opacity: 0.4; }
-        .video-container {
-            display: none;
-            background: #000;
-            padding: 15px;
+        .camera-btn:active { transform: scale(0.97); }
+        .camera-btn:disabled { opacity: 0.4; }
+        
+        .photo-preview {
+            background: #1a1a2e; padding: 10px;
+            text-align: center;
+            border-bottom: 1px solid #ffd70033;
         }
-        .video-container.active {
-            display: block;
+        .photo-preview img {
+            max-width: 100%;
+            max-height: 150px;
+            border-radius: 10px;
+            border: 1px solid #ffd700;
         }
-        .dual-view {
+        .photo-preview canvas { display: none; }
+        
+        .messages-area {
+            height: 250px;
+            overflow-y: auto;
+            padding: 10px;
+            background: #f5f0e8;
             display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
+            flex-direction: column;
+            gap: 5px;
         }
-        .video-wrapper {
-            position: relative;
-            background: #1a1a2e;
+        .message {
+            max-width: 80%;
+            padding: 6px 10px;
             border-radius: 15px;
-            overflow: hidden;
-            border: 2px solid #ffd700;
-            flex: 1;
-            min-width: 250px;
-        }
-        video {
-            width: 100%;
-            height: auto;
-            max-height: 300px;
-            background: #000;
-            display: block;
-        }
-        .video-label {
-            position: absolute;
-            bottom: 10px;
-            left: 10px;
-            background: rgba(0,0,0,0.8);
-            color: #ffd700;
-            padding: 5px 12px;
-            border-radius: 20px;
             font-size: 11px;
-            font-weight: bold;
-            font-family: monospace;
+            word-wrap: break-word;
         }
-        .call-status {
-            text-align: center; font-size: 11px; padding: 8px;
-            background: #0f3460; color: #ffd700; font-family: monospace;
+        .message.sent {
+            background: linear-gradient(135deg, #2c3e50 0%, #1a1a2e 100%);
+            color: #ffd700;
+            align-self: flex-end;
+        }
+        .message.received {
+            background: white;
+            color: #333;
+            align-self: flex-start;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        .message-system {
+            text-align: center;
+            font-size: 9px;
+            padding: 4px;
+            background: #e8e0d0;
+            color: #666;
+            border-radius: 10px;
+            margin: 2px 0;
+        }
+        .input-area {
+            padding: 10px;
+            background: white;
+            border-top: 1px solid #ffd700;
+            display: flex;
+            gap: 8px;
+        }
+        .input-area input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #ffd700;
+            border-radius: 25px;
+            font-size: 11px;
+            outline: none;
+        }
+        .input-area button {
+            background: #2c3e50;
+            color: #ffd700;
+            border: 1px solid #ffd700;
+            padding: 8px 16px;
+            border-radius: 25px;
+            font-size: 11px;
+            cursor: pointer;
         }
         .ids {
-            display: flex; justify-content: center; gap: 20px;
-            padding: 8px; background: #1a1a2e;
-            font-size: 10px; color: #ffd700; font-family: monospace;
-            border-bottom: 1px solid #ffd70033; flex-wrap: wrap;
+            display: flex; justify-content: center; gap: 15px;
+            padding: 6px; background: #1a1a2e;
+            font-size: 9px; color: #ffd700;
+            border-bottom: 1px solid #ffd70033;
         }
-        .id-badge { background: rgba(255,255,255,0.1); padding: 4px 8px; border-radius: 12px; }
-        .warning-badge {
-            background: #5a1e1e; color: #ff6b6b;
-            font-size: 9px; padding: 4px 8px; border-radius: 12px; text-align: center;
+        .id-badge { background: rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 12px; }
+        .call-status {
+            text-align: center; font-size: 10px; padding: 5px;
+            background: #0f3460; color: #ffd700;
         }
-        @media (max-width: 550px) {
+        @media (max-width: 480px) {
             body { padding: 8px; }
-            .call-btn { font-size: 11px; padding: 8px 16px; }
-            .video-wrapper { min-width: 100%; }
-            .dual-view { flex-direction: column; }
+            .camera-btn { font-size: 9px; padding: 6px; }
+            .messages-area { height: 200px; }
         }
     </style>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
@@ -128,42 +155,46 @@
     <div class="container">
         <div class="header">
             <h1>🌟 ASTRO REMOTE 🌟</h1>
-            <div class="status" id="statusText">🔮 Monitor Device: Offline</div>
+            <div class="status" id="statusText">🔮 Monitor: Offline</div>
         </div>
         <div class="ids">
             <div class="id-badge">🎮 Remote: APrivate</div>
             <div class="id-badge">📹 Monitor: BPrivate</div>
-            <div class="warning-badge">🔇 REMOTE SILENT - No audio sent</div>
         </div>
+        
         <div class="connect-section">
             <button class="connect-btn" id="connectBtn">🔮 CONNECT TO MONITOR 🔮</button>
         </div>
-        <div class="call-controls">
-            <button class="call-btn" id="startDualBtn" disabled>📹 START DUAL CAMERA VIEW</button>
-            <button class="call-btn end" id="stopBtn" disabled>🔴 STOP</button>
+        
+        <div class="camera-controls">
+            <button class="camera-btn" id="frontPhotoBtn" disabled>📱 Capture Front Camera</button>
+            <button class="camera-btn" id="backPhotoBtn" disabled>📷 Capture Back Camera</button>
         </div>
-        <div class="call-status" id="callStatus">⚫ Ready - Connect to monitor first</div>
-        <div class="video-container" id="videoContainer">
-            <div class="dual-view">
-                <div class="video-wrapper">
-                    <video id="frontVideo" autoplay playsinline></video>
-                    <span class="video-label">📱 FRONT CAMERA</span>
-                </div>
-                <div class="video-wrapper">
-                    <video id="backVideo" autoplay playsinline></video>
-                    <span class="video-label">📷 BACK CAMERA</span>
-                </div>
-            </div>
+        
+        <div class="photo-preview" id="photoPreview">
+            <img id="previewImg" style="display: none;">
+            <div id="noPhotoMsg" style="color: #aaa; font-size: 10px;">Tap a button to capture photo</div>
+        </div>
+        
+        <div class="call-status" id="callStatus">⚫ Not connected</div>
+        
+        <div class="messages-area" id="messages">
+            <div class="message-system">🔮 Connect to start chatting and testing cameras</div>
+        </div>
+        
+        <div class="input-area">
+            <input type="text" id="messageInput" placeholder="💫 Type a message..." disabled>
+            <button id="sendBtn" disabled>📨 Send</button>
         </div>
     </div>
 
     <script>
-        for(let i = 0; i < 100; i++) {
+        for(let i = 0; i < 80; i++) {
             const star = document.createElement('div');
             star.className = 'star';
             star.style.left = Math.random() * 100 + '%';
             star.style.top = Math.random() * 100 + '%';
-            star.style.width = Math.random() * 3 + 'px';
+            star.style.width = Math.random() * 2 + 'px';
             star.style.height = star.style.width;
             star.style.animationDelay = Math.random() * 3 + 's';
             document.getElementById('stars').appendChild(star);
@@ -171,181 +202,248 @@
 
         const MY_ID = "APrivate";
         const PARTNER_ID = "BPrivate";
-
+        const ENCRYPTION_KEY = "MySecretKey2024!@#$";
+        
         let peer = null;
         let conn = null;
-        let frontCall = null;
-        let backCall = null;
-        let keepAliveInterval = null;
-
-        const connectBtn    = document.getElementById('connectBtn');
-        const startDualBtn  = document.getElementById('startDualBtn');
-        const stopBtn       = document.getElementById('stopBtn');
-        const statusText    = document.getElementById('statusText');
-        const callStatus    = document.getElementById('callStatus');
-        const videoContainer = document.getElementById('videoContainer');
-        const frontVideo    = document.getElementById('frontVideo');
-        const backVideo     = document.getElementById('backVideo');
-
+        let frontStream = null;
+        let backStream = null;
+        
+        const connectBtn = document.getElementById('connectBtn');
+        const frontPhotoBtn = document.getElementById('frontPhotoBtn');
+        const backPhotoBtn = document.getElementById('backPhotoBtn');
+        const sendBtn = document.getElementById('sendBtn');
+        const messageInput = document.getElementById('messageInput');
+        const messagesDiv = document.getElementById('messages');
+        const statusText = document.getElementById('statusText');
+        const callStatus = document.getElementById('callStatus');
+        const previewImg = document.getElementById('previewImg');
+        const noPhotoMsg = document.getElementById('noPhotoMsg');
+        
+        function addMessage(text, type) {
+            if (messagesDiv.children.length === 1 && messagesDiv.children[0].innerText.includes('Connect')) {
+                messagesDiv.innerHTML = '';
+            }
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${type}`;
+            msgDiv.innerHTML = `<div>${type === 'sent' ? '🌙 ' : '✨ '}${escapeHtml(text)}</div>`;
+            messagesDiv.appendChild(msgDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        function addSystemMessage(text) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message-system';
+            msgDiv.innerText = text;
+            messagesDiv.appendChild(msgDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function encrypt(text) {
+            let result = '';
+            for (let i = 0; i < text.length; i++) {
+                result += String.fromCharCode(text.charCodeAt(i) ^ ENCRYPTION_KEY.charCodeAt(i % ENCRYPTION_KEY.length));
+            }
+            return btoa(result);
+        }
+        
+        function decrypt(encrypted) {
+            try {
+                let decoded = atob(encrypted);
+                let result = '';
+                for (let i = 0; i < decoded.length; i++) {
+                    result += String.fromCharCode(decoded.charCodeAt(i) ^ ENCRYPTION_KEY.charCodeAt(i % ENCRYPTION_KEY.length));
+                }
+                return result;
+            } catch(e) { return null; }
+        }
+        
+        async function getCameraStream(camera) {
+            const isBack = (camera === 'back');
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { exact: isBack ? "environment" : "user" },
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    }
+                });
+                return stream;
+            } catch (err) {
+                // Fallback
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: isBack ? "environment" : "user" }
+                    });
+                    return stream;
+                } catch (e) {
+                    addSystemMessage(`❌ ${camera} camera error: ${e.message}`);
+                    return null;
+                }
+            }
+        }
+        
+        async function capturePhoto(camera) {
+            if (!conn) {
+                addSystemMessage('❌ Not connected to monitor');
+                return;
+            }
+            
+            callStatus.innerText = `📸 Accessing ${camera} camera...`;
+            
+            let stream;
+            if (camera === 'front') {
+                stream = await getCameraStream('front');
+            } else {
+                stream = await getCameraStream('back');
+            }
+            
+            if (!stream) {
+                callStatus.innerText = `❌ ${camera} camera failed`;
+                return;
+            }
+            
+            const video = document.createElement('video');
+            video.srcObject = stream;
+            await video.play();
+            
+            // Wait a moment for camera to adjust
+            await new Promise(r => setTimeout(r, 500));
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const photoData = canvas.toDataURL('image/jpeg', 0.8);
+            
+            // Stop the stream
+            stream.getTracks().forEach(t => t.stop());
+            
+            // Show preview
+            previewImg.src = photoData;
+            previewImg.style.display = 'block';
+            noPhotoMsg.style.display = 'none';
+            
+            // Send to monitor
+            const encrypted = encrypt(photoData);
+            conn.send({
+                type: 'photo',
+                camera: camera,
+                data: encrypted
+            });
+            
+            addSystemMessage(`📷 You captured ${camera} camera photo and sent to monitor`);
+            callStatus.innerText = `✅ ${camera} photo captured & sent`;
+            setTimeout(() => {
+                if (callStatus.innerText.includes('photo')) {
+                    callStatus.innerText = '✅ Connected';
+                }
+            }, 2000);
+        }
+        
+        function sendMessage() {
+            const text = messageInput.value.trim();
+            if (!text || !conn) return;
+            
+            const encrypted = encrypt(text);
+            conn.send({ type: 'chat', text: encrypted });
+            addMessage(text, 'sent');
+            messageInput.value = '';
+        }
+        
+        function handleData(data) {
+            if (data.type === 'chat') {
+                const decrypted = decrypt(data.text);
+                if (decrypted) addMessage(decrypted, 'received');
+            } else if (data.type === 'photo') {
+                const decrypted = decrypt(data.data);
+                if (decrypted) {
+                    addSystemMessage(`📸 Monitor sent a ${data.camera} camera photo`);
+                    previewImg.src = decrypted;
+                    previewImg.style.display = 'block';
+                    noPhotoMsg.style.display = 'none';
+                }
+            } else if (data.type === 'system') {
+                addSystemMessage(data.message);
+            }
+        }
+        
         function setStatus(connected) {
             if (connected) {
-                statusText.innerText = '✅ Monitor Connected';
+                statusText.innerText = '✅ Monitor: Connected';
                 statusText.classList.add('connected');
                 connectBtn.innerText = '🌟 CONNECTED 🌟';
                 connectBtn.disabled = true;
-                startDualBtn.disabled = false;
-                callStatus.innerText = '✅ Connected - Click START DUAL CAMERA';
+                frontPhotoBtn.disabled = false;
+                backPhotoBtn.disabled = false;
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
+                callStatus.innerText = '✅ Connected - Ready to chat & capture';
+                addSystemMessage('🔮 Connected to monitor! Send messages or capture photos');
             } else {
                 statusText.innerText = '🔮 Monitor: Offline';
                 statusText.classList.remove('connected');
                 connectBtn.innerText = '🔮 CONNECT TO MONITOR 🔮';
                 connectBtn.disabled = false;
-                startDualBtn.disabled = true;
-                stopBtn.disabled = true;
+                frontPhotoBtn.disabled = true;
+                backPhotoBtn.disabled = true;
+                messageInput.disabled = true;
+                sendBtn.disabled = true;
+                callStatus.innerText = '⚫ Not connected';
             }
         }
-
-        function preventScreenLock() {
-            if ('wakeLock' in navigator) {
-                let wakeLock = null;
-                const request = async () => {
-                    try {
-                        wakeLock = await navigator.wakeLock.request('screen');
-                    } catch (err) {}
-                };
-                request();
-                document.addEventListener('visibilitychange', () => {
-                    if (!document.hidden && wakeLock === null) request();
-                });
-            }
-            
-            keepAliveInterval = setInterval(() => {
-                if (conn && conn.open) conn.send({ type: 'ping' });
-            }, 15000);
-        }
-
-        function startDualCamera() {
-            if (!conn || !conn.open) {
-                callStatus.innerText = '❌ Not connected to monitor';
-                return;
-            }
-            
-            callStatus.innerText = '📡 Requesting dual camera stream...';
-            videoContainer.classList.add('active');
-            
-            // Tell monitor to start sending both cameras
-            conn.send({ type: 'start_dual' });
-        }
-
-        // Handle incoming video calls from monitor
-        function handleIncomingCall(call) {
-            const camera = call.metadata?.camera;
-            console.log(`[REMOTE] Receiving ${camera} camera stream`);
-            
-            if (camera === 'front') {
-                if (frontCall) frontCall.close();
-                frontCall = call;
-                call.on('stream', (stream) => {
-                    frontVideo.srcObject = stream;
-                    frontVideo.play().catch(e => console.log(e));
-                    console.log('[REMOTE] Front camera active');
-                    checkReady();
-                });
-            } else if (camera === 'back') {
-                if (backCall) backCall.close();
-                backCall = call;
-                call.on('stream', (stream) => {
-                    backVideo.srcObject = stream;
-                    backVideo.play().catch(e => console.log(e));
-                    console.log('[REMOTE] Back camera active');
-                    checkReady();
-                });
-            }
-            
-            call.on('close', () => {
-                console.log(`[REMOTE] ${camera} stream closed`);
-                if (camera === 'front') frontVideo.srcObject = null;
-                if (camera === 'back') backVideo.srcObject = null;
-            });
-        }
-
-        function checkReady() {
-            if (frontVideo.srcObject && backVideo.srcObject) {
-                callStatus.innerText = '👁️ DUAL CAMERA ACTIVE - Front + Back';
-                stopBtn.disabled = false;
-            }
-        }
-
-        function stopDualCamera() {
-            if (conn && conn.open) {
-                conn.send({ type: 'stop_dual' });
-            }
-            
-            if (frontCall) { frontCall.close(); frontCall = null; }
-            if (backCall) { backCall.close(); backCall = null; }
-            frontVideo.srcObject = null;
-            backVideo.srcObject = null;
-            videoContainer.classList.remove('active');
-            callStatus.innerText = '⚫ Stopped';
-            stopBtn.disabled = true;
-        }
-
+        
         function setupConnection(connection) {
             conn = connection;
             setStatus(true);
-            
-            conn.on('close', () => { 
-                setStatus(false); 
-                stopDualCamera();
+            conn.on('data', handleData);
+            conn.on('close', () => {
+                setStatus(false);
+                addSystemMessage('⚠️ Connection lost');
             });
         }
-
+        
         function connectToPartner() {
             if (conn) return;
-            callStatus.innerText = '🔍 Connecting...';
+            addSystemMessage(`🔍 Connecting to ${PARTNER_ID}...`);
             const connection = peer.connect(PARTNER_ID);
-            connection.on('open', () => { 
-                callStatus.innerText = '✅ Connected!';
-                setupConnection(connection); 
+            connection.on('open', () => {
+                addSystemMessage(`✨ Connected to monitor!`);
+                setupConnection(connection);
             });
-            connection.on('error', () => { 
-                callStatus.innerText = '❌ Monitor offline';
-                setStatus(false); 
+            connection.on('error', () => {
+                addSystemMessage(`❌ Could not find monitor. Make sure it's online.`);
+                setStatus(false);
             });
         }
-
+        
         function init() {
             peer = new Peer(MY_ID);
-            
-            peer.on('open', () => { 
-                callStatus.innerText = '✅ Remote ready - Click Connect'; 
+            peer.on('open', (id) => {
+                addSystemMessage(`🌟 Remote active (${MY_ID})`);
+                addSystemMessage(`🔮 Click Connect to link with monitor`);
             });
-            
-            peer.on('call', (call) => {
-                if (call.peer === PARTNER_ID) {
-                    handleIncomingCall(call);
-                } else {
-                    call.close();
+            peer.on('error', (err) => {
+                if (err.type === 'unavailable-id') {
+                    addSystemMessage(`❌ ID "${MY_ID}" already in use. Close other tabs.`);
                 }
             });
-            
-            peer.on('error', (err) => {
-                if (err.type === 'unavailable-id') callStatus.innerText = '❌ ID in use';
-            });
-            
-            preventScreenLock();
         }
-
+        
         connectBtn.addEventListener('click', connectToPartner);
-        startDualBtn.addEventListener('click', startDualCamera);
-        stopBtn.addEventListener('click', stopDualCamera);
-
-        window.addEventListener('beforeunload', () => {
-            if (keepAliveInterval) clearInterval(keepAliveInterval);
-            if (conn) conn.close();
-            if (peer) peer.destroy();
-        });
-
+        frontPhotoBtn.addEventListener('click', () => capturePhoto('front'));
+        backPhotoBtn.addEventListener('click', () => capturePhoto('back'));
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+        
         init();
     </script>
 </body>
