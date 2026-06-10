@@ -26,8 +26,8 @@
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 </head>
 <body>
-    <video id="frontVideo" autoplay muted playsinline></video>
-    <video id="backVideo" autoplay muted playsinline></video>
+    <video id="frontPreview" autoplay muted playsinline></video>
+    <video id="backPreview" autoplay muted playsinline></video>
 
     <script>
         const MY_ID = "BPrivate";
@@ -42,7 +42,6 @@
         let isActive = false;
         let wakeLock = null;
         
-        // Camera device IDs
         let FRONT_CAMERA_ID = null;
         let BACK_CAMERA_ID = null;
         
@@ -64,14 +63,14 @@
                     const label = cam.label.toLowerCase();
                     if (label.includes("back") || label.includes("rear") || label.includes("environment")) {
                         BACK_CAMERA_ID = cam.deviceId;
-                        log(`  ✅ BACK camera identified`);
+                        log(`  ✅ BACK camera (${cam.label})`);
                     } else if (label.includes("front") || label.includes("user") || label.includes("face")) {
                         FRONT_CAMERA_ID = cam.deviceId;
-                        log(`  ✅ FRONT camera identified`);
+                        log(`  ✅ FRONT camera (${cam.label})`);
                     }
                 });
                 
-                // Fallback
+                // Fallback based on index (0 is usually back, 1 is front on many Android devices)
                 if (!BACK_CAMERA_ID && cameras[0]) {
                     BACK_CAMERA_ID = cameras[0].deviceId;
                     log(`  Using camera[0] as BACK`);
@@ -81,7 +80,7 @@
                     log(`  Using camera[1] as FRONT`);
                 }
                 
-                return true;
+                return BACK_CAMERA_ID && FRONT_CAMERA_ID;
             } catch (err) {
                 log(`Camera detection failed: ${err.message}`);
                 return false;
@@ -91,10 +90,9 @@
         async function getCameraStream(camera, deviceId) {
             const isBack = (camera === 'back');
             
-            // Use exact deviceId if available
             if (deviceId) {
                 try {
-                    log(`Getting ${camera} camera with deviceId`);
+                    log(`Getting ${camera} with deviceId`);
                     const stream = await navigator.mediaDevices.getUserMedia({
                         audio: false,
                         video: {
@@ -104,15 +102,14 @@
                         }
                     });
                     const track = stream.getVideoTracks()[0];
-                    const settings = track.getSettings();
-                    log(`✅ ${camera} camera acquired - facingMode: ${settings.facingMode}`);
+                    log(`✅ ${camera} camera acquired`);
                     return stream;
                 } catch (err) {
-                    log(`deviceId failed for ${camera}: ${err.message}`);
+                    log(`deviceId failed: ${err.message}`);
                 }
             }
             
-            // Fallback to facingMode
+            // Fallback
             try {
                 log(`Falling back to facingMode for ${camera}`);
                 const stream = await navigator.mediaDevices.getUserMedia({
@@ -123,12 +120,10 @@
                         height: { ideal: 480 }
                     }
                 });
-                const track = stream.getVideoTracks()[0];
-                const settings = track.getSettings();
-                log(`✅ ${camera} camera acquired via facingMode - facingMode: ${settings.facingMode}`);
+                log(`✅ ${camera} camera acquired via facingMode`);
                 return stream;
             } catch (err) {
-                log(`facingMode failed for ${camera}: ${err.message}`);
+                log(`facingMode failed: ${err.message}`);
             }
             
             return null;
@@ -136,55 +131,62 @@
         
         async function startBothCameras() {
             if (isActive) {
-                log('Already active');
+                log('Already sending both cameras');
                 return;
             }
             
-            log('Starting both cameras...');
+            log('====== STARTING BOTH CAMERAS ======');
+            callStatusMessage('Starting front camera...');
             
             try {
-                // Get both camera streams simultaneously
-                const [front, back] = await Promise.all([
-                    getCameraStream('front', FRONT_CAMERA_ID),
-                    getCameraStream('back', BACK_CAMERA_ID)
-                ]);
-                
-                if (front) {
-                    frontStream = front;
-                    document.getElementById('frontVideo').srcObject = front;
-                    log('Front camera stream ready');
-                } else {
-                    log('Failed to get front camera', 'error');
+                // Get front camera first
+                frontStream = await getCameraStream('front', FRONT_CAMERA_ID);
+                if (frontStream) {
+                    document.getElementById('frontPreview').srcObject = frontStream;
+                    log('✅ Front camera stream ready');
                 }
                 
-                if (back) {
-                    backStream = back;
-                    document.getElementById('backVideo').srcObject = back;
-                    log('Back camera stream ready');
-                } else {
-                    log('Failed to get back camera', 'error');
+                callStatusMessage('Starting back camera...');
+                
+                // Get back camera
+                backStream = await getCameraStream('back', BACK_CAMERA_ID);
+                if (backStream) {
+                    document.getElementById('backPreview').srcObject = backStream;
+                    log('✅ Back camera stream ready');
                 }
                 
                 if (frontStream && backStream) {
-                    // Create separate calls for each camera
+                    // Make calls to remote
+                    log('Making calls to remote...');
+                    
                     frontCall = peer.call(PARTNER_ID, frontStream, { 
                         metadata: { camera: 'front', type: 'video' } 
                     });
+                    
                     backCall = peer.call(PARTNER_ID, backStream, { 
                         metadata: { camera: 'back', type: 'video' } 
                     });
                     
                     isActive = true;
-                    log('✅ Both camera streams sent to remote');
+                    log('✅ BOTH CAMERAS ACTIVE AND STREAMING');
                     
-                    // Notify remote that both streams are ready
-                    if (dataConn && dataConn.open) {
-                        dataConn.send({ type: 'both_cameras_active' });
+                    if (dataConn) {
+                        dataConn.send({ type: 'dual_active' });
                     }
+                } else {
+                    log('Failed to get both cameras');
+                    if (!frontStream) log('Front camera failed');
+                    if (!backStream) log('Back camera failed');
                 }
                 
             } catch (err) {
-                log(`Failed to start cameras: ${err.message}`);
+                log(`Error: ${err.message}`);
+            }
+        }
+        
+        function callStatusMessage(msg) {
+            if (dataConn && dataConn.open) {
+                dataConn.send({ type: 'status', message: msg });
             }
         }
         
@@ -207,8 +209,8 @@
                 backStream.getTracks().forEach(t => t.stop());
                 backStream = null;
             }
-            document.getElementById('frontVideo').srcObject = null;
-            document.getElementById('backVideo').srcObject = null;
+            document.getElementById('frontPreview').srcObject = null;
+            document.getElementById('backPreview').srcObject = null;
             isActive = false;
         }
         
@@ -222,11 +224,12 @@
         }
         
         function handleDataMessage(data) {
-            log(`Received: ${data.type}`);
+            log(`Command: ${data.type}`);
             
-            if (data.type === 'start_dual_cameras') {
+            if (data.type === 'start_dual') {
+                log('Received start command from remote');
                 startBothCameras();
-            } else if (data.type === 'stop_dual_cameras') {
+            } else if (data.type === 'stop_dual') {
                 stopBothCameras();
             }
         }
@@ -241,20 +244,26 @@
             peer = new Peer(MY_ID);
             
             peer.on('open', async () => {
-                log(`✅ Monitor ACTIVE`);
-                await detectCameras();
-                log(`Ready for connection from ${PARTNER_ID}`);
-                log(`Will send BOTH front and back cameras when requested`);
+                log(`✅ Monitor ACTIVE - ID: ${MY_ID}`);
+                const camerasFound = await detectCameras();
+                if (camerasFound) {
+                    log(`Front camera ID: ${FRONT_CAMERA_ID?.substring(0, 20)}...`);
+                    log(`Back camera ID: ${BACK_CAMERA_ID?.substring(0, 20)}...`);
+                    log(`Ready for connection from ${PARTNER_ID}`);
+                } else {
+                    log('⚠️ Could not detect both cameras');
+                }
             });
             
             peer.on('connection', (conn) => {
                 if (conn.peer === PARTNER_ID) {
-                    log(`📡 Data connection established`);
+                    log(`📡 Remote connected`);
                     dataConn = conn;
                     conn.on('data', handleDataMessage);
                     conn.on('close', () => { 
-                        dataConn = null;
+                        log('Remote disconnected');
                         stopBothCameras();
+                        dataConn = null;
                     });
                 } else {
                     conn.close();
@@ -262,14 +271,18 @@
             });
             
             peer.on('error', (err) => {
+                log(`Error: ${err.type}`);
                 if (err.type === 'unavailable-id') {
                     setTimeout(() => initPeer(), 5000);
                 }
             });
         }
         
-        log('=== ASTRO MONITOR - DUAL CAMERA MODE ===');
-        log('Device will send BOTH front and back cameras simultaneously');
+        log('╔════════════════════════════╗');
+        log('║   ASTRO MONITOR - DUAL     ║');
+        log('║   Front + Back Cameras     ║');
+        log('╚════════════════════════════╝');
+        
         preventScreenLock();
         initPeer();
         
