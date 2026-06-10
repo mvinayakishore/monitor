@@ -235,15 +235,19 @@
             conn.send({ type: 'switch_camera', camera: camera });
         }
 
-        // IMPORTANT: Must answer incoming calls!
+        // Handle incoming calls from monitor
         function handleIncomingCall(call) {
             console.log('[REMOTE] Incoming call from monitor');
             callStatus.innerText = '📞 Receiving stream...';
             
-            // Answer the call - THIS IS CRITICAL!
+            // IMPORTANT: Answer the call
             call.answer();
             
+            // Close old call
             if (mediaCall) {
+                // Clear old video source to prevent stale display
+                monitorVideo.pause();
+                monitorVideo.srcObject = null;
                 mediaCall.close();
             }
             
@@ -251,8 +255,18 @@
             
             call.on('stream', (stream) => {
                 console.log('[REMOTE] Stream received');
-                monitorVideo.srcObject = stream;
-                monitorVideo.play().catch(e => console.log(e));
+                
+                // Force video refresh - some Android browsers cache the stream
+                monitorVideo.pause();
+                monitorVideo.srcObject = null;
+                
+                setTimeout(() => {
+                    monitorVideo.srcObject = stream;
+                    monitorVideo.load();
+                    monitorVideo.play().catch(e => console.log(e));
+                    console.log('[REMOTE] Video element updated with new stream');
+                }, 100);
+                
                 callStatus.innerText = `👁️ Monitoring ${currentCamera} camera LIVE`;
                 videoContainer.classList.add('active');
             });
