@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Astro Remote - Control Monitor Camera</title>
+    <title>Astro Remote - Monitor Controller</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -179,7 +179,7 @@
                 connectBtn.disabled = true;
                 frontCameraBtn.disabled = false;
                 backCameraBtn.disabled = false;
-                callStatus.innerText = '✅ Connected - Select a camera to start monitoring';
+                callStatus.innerText = '✅ Connected - Select a camera';
             } else {
                 statusText.innerText = '🔮 Monitor: Offline';
                 statusText.classList.remove('connected');
@@ -212,7 +212,7 @@
 
         function switchMonitorCamera(camera) {
             if (!conn || !conn.open) {
-                callStatus.innerText = '❌ Not connected to monitor';
+                callStatus.innerText = '❌ Not connected';
                 return;
             }
             
@@ -232,7 +232,7 @@
             callStatus.innerText = `📡 Switching to ${camera} camera...`;
             videoContainer.classList.add('active');
             
-            // Send command to monitor to switch camera
+            // Send command to monitor
             conn.send({ type: 'switch_camera', camera: camera });
         }
 
@@ -257,30 +257,10 @@
             });
         }
 
-        function handleDataMessage(data) {
-            console.log(`[REMOTE] Received: ${data.type}`);
-            
-            if (data.type === 'camera_switched') {
-                callStatus.innerText = `✅ ${data.camera} camera ACTIVE`;
-                setTimeout(() => {
-                    if (callStatus.innerText.includes('ACTIVE')) {
-                        callStatus.innerText = `👁️ Monitoring ${currentCamera} camera LIVE`;
-                    }
-                }, 1500);
-            } else if (data.type === 'stream_ready') {
-                console.log('[REMOTE] Monitor is ready to stream');
-                // Monitor is ready, request the stream
-                if (conn && conn.open) {
-                    conn.send({ type: 'request_stream', camera: currentCamera });
-                }
-            }
-        }
-
         function setupConnection(connection) {
             conn = connection;
             setStatus(true);
             
-            conn.on('data', handleDataMessage);
             conn.on('close', () => { 
                 setStatus(false); 
                 if (mediaCall) mediaCall.close();
