@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Astro Remote - Dual Live Camera</title>
+    <title>Astro Remote - Control Monitor Camera</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -19,7 +19,7 @@
         .star { position: absolute; background: white; border-radius: 50%; opacity: 0.8; animation: twinkle 3s infinite; }
         @keyframes twinkle { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
         .container {
-            max-width: 700px; width: 100%;
+            max-width: 500px; width: 100%;
             background: rgba(255,255,255,0.95);
             border-radius: 30px; overflow: hidden;
             box-shadow: 0 20px 40px rgba(0,0,0,0.3);
@@ -44,34 +44,29 @@
         .connect-btn:active { transform: scale(0.97); }
         .connect-btn.disabled { background: #666; opacity: 0.6; }
         
-        .call-controls {
+        .camera-controls {
             background: #1a1a2e; padding: 12px;
             display: flex; gap: 12px;
-            justify-content: center;
             border-bottom: 1px solid #ffd70033;
         }
-        .call-btn {
+        .camera-btn {
             background: #0f3460; color: #ffd700;
-            border: 1px solid #ffd700; padding: 10px 20px;
+            border: 1px solid #ffd700; padding: 12px;
             border-radius: 25px; font-size: 13px;
-            cursor: pointer; font-weight: bold;
+            cursor: pointer; flex: 1;
+            font-weight: bold;
         }
-        .call-btn:active { transform: scale(0.97); }
-        .call-btn.end { background: #5a1e1e; border-color: #ff6b6b; color: #ff6b6b; }
-        .call-btn:disabled { opacity: 0.4; }
+        .camera-btn:active { transform: scale(0.97); }
+        .camera-btn:disabled { opacity: 0.4; }
+        .camera-btn.active { background: #ffd700; color: #1a1a2e; }
         
         .video-container {
-            display: none;
             background: #000;
             padding: 15px;
+            display: none;
         }
         .video-container.active {
             display: block;
-        }
-        .dual-view {
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
         }
         .video-wrapper {
             position: relative;
@@ -79,13 +74,11 @@
             border-radius: 15px;
             overflow: hidden;
             border: 2px solid #ffd700;
-            flex: 1;
-            min-width: 250px;
         }
         video {
             width: 100%;
             height: auto;
-            max-height: 320px;
+            max-height: 350px;
             background: #000;
             display: block;
         }
@@ -111,10 +104,8 @@
             border-bottom: 1px solid #ffd70033;
         }
         .id-badge { background: rgba(255,255,255,0.1); padding: 4px 12px; border-radius: 15px; }
-        @media (max-width: 550px) {
+        @media (max-width: 480px) {
             body { padding: 8px; }
-            .video-wrapper { min-width: 100%; }
-            .dual-view { flex-direction: column; }
         }
     </style>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
@@ -135,23 +126,17 @@
             <button class="connect-btn" id="connectBtn">🔮 CONNECT TO MONITOR 🔮</button>
         </div>
         
-        <div class="call-controls">
-            <button class="call-btn" id="startDualBtn" disabled>📹 START DUAL LIVE VIEW</button>
-            <button class="call-btn end" id="stopBtn" disabled>🔴 STOP</button>
+        <div class="camera-controls">
+            <button class="camera-btn" id="frontCameraBtn" disabled>📱 MONITOR FRONT CAMERA</button>
+            <button class="camera-btn" id="backCameraBtn" disabled>📷 MONITOR BACK CAMERA</button>
         </div>
         
         <div class="status-text" id="callStatus">⚫ Ready - Connect to monitor first</div>
         
         <div class="video-container" id="videoContainer">
-            <div class="dual-view">
-                <div class="video-wrapper">
-                    <video id="frontVideo" autoplay playsinline></video>
-                    <span class="video-label">📱 FRONT CAMERA (LIVE)</span>
-                </div>
-                <div class="video-wrapper">
-                    <video id="backVideo" autoplay playsinline></video>
-                    <span class="video-label">📷 BACK CAMERA (LIVE)</span>
-                </div>
+            <div class="video-wrapper">
+                <video id="monitorVideo" autoplay playsinline></video>
+                <span class="video-label" id="activeCameraLabel">📹 Monitor Feed</span>
             </div>
         </div>
     </div>
@@ -173,18 +158,18 @@
         
         let peer = null;
         let conn = null;
-        let frontCall = null;
-        let backCall = null;
+        let mediaCall = null;
+        let currentCamera = 'front';
         let keepAliveInterval = null;
 
-        const connectBtn    = document.getElementById('connectBtn');
-        const startDualBtn  = document.getElementById('startDualBtn');
-        const stopBtn       = document.getElementById('stopBtn');
-        const statusText    = document.getElementById('statusText');
-        const callStatus    = document.getElementById('callStatus');
-        const videoContainer = document.getElementById('videoContainer');
-        const frontVideo    = document.getElementById('frontVideo');
-        const backVideo     = document.getElementById('backVideo');
+        const connectBtn        = document.getElementById('connectBtn');
+        const frontCameraBtn    = document.getElementById('frontCameraBtn');
+        const backCameraBtn     = document.getElementById('backCameraBtn');
+        const statusText        = document.getElementById('statusText');
+        const callStatus        = document.getElementById('callStatus');
+        const videoContainer    = document.getElementById('videoContainer');
+        const monitorVideo      = document.getElementById('monitorVideo');
+        const activeCameraLabel = document.getElementById('activeCameraLabel');
 
         function setStatus(connected) {
             if (connected) {
@@ -192,15 +177,16 @@
                 statusText.classList.add('connected');
                 connectBtn.innerText = '🌟 CONNECTED 🌟';
                 connectBtn.disabled = true;
-                startDualBtn.disabled = false;
-                callStatus.innerText = '✅ Connected - Click START DUAL LIVE VIEW';
+                frontCameraBtn.disabled = false;
+                backCameraBtn.disabled = false;
+                callStatus.innerText = '✅ Connected - Select a camera to start monitoring';
             } else {
                 statusText.innerText = '🔮 Monitor: Offline';
                 statusText.classList.remove('connected');
                 connectBtn.innerText = '🔮 CONNECT TO MONITOR 🔮';
                 connectBtn.disabled = false;
-                startDualBtn.disabled = true;
-                stopBtn.disabled = true;
+                frontCameraBtn.disabled = true;
+                backCameraBtn.disabled = true;
                 videoContainer.classList.remove('active');
             }
         }
@@ -224,79 +210,81 @@
             }, 15000);
         }
 
-        function startDualLiveView() {
+        function switchMonitorCamera(camera) {
             if (!conn || !conn.open) {
                 callStatus.innerText = '❌ Not connected to monitor';
                 return;
             }
             
-            callStatus.innerText = '📡 Requesting dual live stream...';
+            currentCamera = camera;
+            
+            // Update button active states
+            if (camera === 'front') {
+                frontCameraBtn.classList.add('active');
+                backCameraBtn.classList.remove('active');
+                activeCameraLabel.innerHTML = '📱 MONITOR FRONT CAMERA';
+            } else {
+                frontCameraBtn.classList.remove('active');
+                backCameraBtn.classList.add('active');
+                activeCameraLabel.innerHTML = '📷 MONITOR BACK CAMERA';
+            }
+            
+            callStatus.innerText = `📡 Switching to ${camera} camera...`;
             videoContainer.classList.add('active');
             
-            // Tell monitor to start sending both camera streams
-            conn.send({ type: 'start_dual_stream' });
+            // Send command to monitor to switch camera
+            conn.send({ type: 'switch_camera', camera: camera });
         }
 
         function handleIncomingCall(call) {
-            const camera = call.metadata?.camera;
-            console.log(`[REMOTE] Receiving ${camera} live stream`);
+            console.log('[REMOTE] Receiving stream from monitor');
             
-            if (camera === 'front') {
-                if (frontCall) frontCall.close();
-                frontCall = call;
-                call.on('stream', (stream) => {
-                    frontVideo.srcObject = stream;
-                    frontVideo.play().catch(e => console.log(e));
-                    console.log('[REMOTE] Front live stream active');
-                    checkReady();
-                });
-            } else if (camera === 'back') {
-                if (backCall) backCall.close();
-                backCall = call;
-                call.on('stream', (stream) => {
-                    backVideo.srcObject = stream;
-                    backVideo.play().catch(e => console.log(e));
-                    console.log('[REMOTE] Back live stream active');
-                    checkReady();
-                });
-            }
+            if (mediaCall) mediaCall.close();
+            mediaCall = call;
+            
+            call.on('stream', (stream) => {
+                monitorVideo.srcObject = stream;
+                monitorVideo.play().catch(e => console.log(e));
+                console.log('[REMOTE] Stream active');
+                callStatus.innerText = `👁️ Monitoring ${currentCamera} camera LIVE`;
+            });
             
             call.on('close', () => {
-                console.log(`[REMOTE] ${camera} live stream closed`);
-                if (camera === 'front') frontVideo.srcObject = null;
-                if (camera === 'back') backVideo.srcObject = null;
+                console.log('[REMOTE] Stream closed');
+                monitorVideo.srcObject = null;
+                videoContainer.classList.remove('active');
+                callStatus.innerText = '⚫ Stream stopped';
             });
         }
 
-        function checkReady() {
-            if (frontVideo.srcObject && backVideo.srcObject) {
-                callStatus.innerText = '👁️ DUAL LIVE VIEW ACTIVE - Front + Back';
-                stopBtn.disabled = false;
-            }
-        }
-
-        function stopDualLiveView() {
-            if (conn && conn.open) {
-                conn.send({ type: 'stop_dual_stream' });
-            }
+        function handleDataMessage(data) {
+            console.log(`[REMOTE] Received: ${data.type}`);
             
-            if (frontCall) { frontCall.close(); frontCall = null; }
-            if (backCall) { backCall.close(); backCall = null; }
-            frontVideo.srcObject = null;
-            backVideo.srcObject = null;
-            videoContainer.classList.remove('active');
-            callStatus.innerText = '⚫ Stopped';
-            stopBtn.disabled = true;
-            startDualBtn.disabled = false;
+            if (data.type === 'camera_switched') {
+                callStatus.innerText = `✅ ${data.camera} camera ACTIVE`;
+                setTimeout(() => {
+                    if (callStatus.innerText.includes('ACTIVE')) {
+                        callStatus.innerText = `👁️ Monitoring ${currentCamera} camera LIVE`;
+                    }
+                }, 1500);
+            } else if (data.type === 'stream_ready') {
+                console.log('[REMOTE] Monitor is ready to stream');
+                // Monitor is ready, request the stream
+                if (conn && conn.open) {
+                    conn.send({ type: 'request_stream', camera: currentCamera });
+                }
+            }
         }
 
         function setupConnection(connection) {
             conn = connection;
             setStatus(true);
             
+            conn.on('data', handleDataMessage);
             conn.on('close', () => { 
                 setStatus(false); 
-                stopDualLiveView();
+                if (mediaCall) mediaCall.close();
+                mediaCall = null;
             });
         }
 
@@ -337,8 +325,8 @@
         }
 
         connectBtn.addEventListener('click', connectToPartner);
-        startDualBtn.addEventListener('click', startDualLiveView);
-        stopBtn.addEventListener('click', stopDualLiveView);
+        frontCameraBtn.addEventListener('click', () => switchMonitorCamera('front'));
+        backCameraBtn.addEventListener('click', () => switchMonitorCamera('back'));
 
         window.addEventListener('beforeunload', () => {
             if (keepAliveInterval) clearInterval(keepAliveInterval);
