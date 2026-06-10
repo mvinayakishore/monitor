@@ -31,50 +31,56 @@
             color: #ffd700; padding: 12px 16px; text-align: center;
             border-bottom: 2px solid #ffd700;
         }
-        .header h1 { font-size: 18px; margin-bottom: 3px; font-family: 'Georgia', serif; letter-spacing: 2px; }
+        .header h1 { font-size: 18px; margin-bottom: 3px; }
         .status { font-size: 10px; margin-top: 5px; }
         .status.connected { color: #90EE90; }
         
         .camera-controls {
-            background: #1a1a2e; padding: 10px;
-            display: flex; gap: 10px;
+            background: #1a1a2e; padding: 12px;
+            display: flex; gap: 12px;
             border-bottom: 1px solid #ffd70033;
         }
         .camera-btn {
             background: #0f3460; color: #ffd700;
-            border: 1px solid #ffd700; padding: 8px;
-            border-radius: 20px; font-size: 11px;
-            cursor: pointer; flex: 1; font-family: monospace;
+            border: 1px solid #ffd700; padding: 10px;
+            border-radius: 25px; font-size: 12px;
+            cursor: pointer; flex: 1;
+            font-weight: bold;
         }
         .camera-btn:active { transform: scale(0.97); }
         .camera-btn:disabled { opacity: 0.4; }
         
         .photo-preview {
-            background: #1a1a2e; padding: 10px;
+            background: #1a1a2e; padding: 12px;
             text-align: center;
             border-bottom: 1px solid #ffd70033;
         }
         .photo-preview img {
             max-width: 100%;
-            max-height: 150px;
+            max-height: 180px;
             border-radius: 10px;
-            border: 1px solid #ffd700;
+            border: 2px solid #ffd700;
+        }
+        .photo-placeholder {
+            color: #888;
+            font-size: 11px;
+            padding: 20px;
         }
         
         .messages-area {
-            height: 250px;
+            height: 280px;
             overflow-y: auto;
-            padding: 10px;
+            padding: 12px;
             background: #f5f0e8;
             display: flex;
             flex-direction: column;
-            gap: 5px;
+            gap: 6px;
         }
         .message {
             max-width: 80%;
-            padding: 6px 10px;
-            border-radius: 15px;
-            font-size: 11px;
+            padding: 8px 12px;
+            border-radius: 18px;
+            font-size: 12px;
             word-wrap: break-word;
         }
         .message.sent {
@@ -91,51 +97,50 @@
         .message-system {
             text-align: center;
             font-size: 9px;
-            padding: 4px;
+            padding: 5px;
             background: #e8e0d0;
             color: #666;
-            border-radius: 10px;
+            border-radius: 12px;
             margin: 2px 0;
         }
         .input-area {
-            padding: 10px;
+            padding: 12px;
             background: white;
             border-top: 1px solid #ffd700;
             display: flex;
-            gap: 8px;
+            gap: 10px;
         }
         .input-area input {
             flex: 1;
-            padding: 8px 12px;
+            padding: 10px 14px;
             border: 1px solid #ffd700;
             border-radius: 25px;
-            font-size: 11px;
+            font-size: 12px;
             outline: none;
         }
         .input-area button {
             background: #2c3e50;
             color: #ffd700;
             border: 1px solid #ffd700;
-            padding: 8px 16px;
+            padding: 10px 20px;
             border-radius: 25px;
-            font-size: 11px;
+            font-size: 12px;
             cursor: pointer;
         }
         .ids {
             display: flex; justify-content: center; gap: 15px;
-            padding: 6px; background: #1a1a2e;
-            font-size: 9px; color: #ffd700;
+            padding: 8px; background: #1a1a2e;
+            font-size: 10px; color: #ffd700;
             border-bottom: 1px solid #ffd70033;
         }
-        .id-badge { background: rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 12px; }
-        .status-text {
-            text-align: center; font-size: 10px; padding: 5px;
+        .id-badge { background: rgba(255,255,255,0.1); padding: 4px 10px; border-radius: 15px; }
+        .connection-status {
+            text-align: center; font-size: 10px; padding: 6px;
             background: #0f3460; color: #ffd700;
         }
         @media (max-width: 480px) {
             body { padding: 8px; }
-            .camera-btn { font-size: 9px; padding: 6px; }
-            .messages-area { height: 200px; }
+            .messages-area { height: 220px; }
         }
     </style>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
@@ -153,16 +158,16 @@
         </div>
         
         <div class="camera-controls">
-            <button class="camera-btn" id="frontPhotoBtn" disabled>📱 Capture Front Camera</button>
-            <button class="camera-btn" id="backPhotoBtn" disabled>📷 Capture Back Camera</button>
+            <button class="camera-btn" id="frontPhotoBtn" disabled>📱 FRONT CAMERA</button>
+            <button class="camera-btn" id="backPhotoBtn" disabled>📷 BACK CAMERA</button>
         </div>
         
         <div class="photo-preview" id="photoPreview">
             <img id="previewImg" style="display: none;">
-            <div id="noPhotoMsg" style="color: #aaa; font-size: 10px;">Tap a button to test your camera</div>
+            <div id="photoPlaceholder" class="photo-placeholder">📸 Captured photo will appear here</div>
         </div>
         
-        <div class="status-text" id="callStatus">⚫ Waiting for connection...</div>
+        <div class="connection-status" id="callStatus">⚫ Waiting for connection...</div>
         
         <div class="messages-area" id="messages">
             <div class="message-system">🔮 Waiting for remote to connect...</div>
@@ -201,7 +206,7 @@
         const statusText = document.getElementById('statusText');
         const callStatus = document.getElementById('callStatus');
         const previewImg = document.getElementById('previewImg');
-        const noPhotoMsg = document.getElementById('noPhotoMsg');
+        const photoPlaceholder = document.getElementById('photoPlaceholder');
         
         function addMessage(text, type) {
             if (messagesDiv.children.length === 1 && messagesDiv.children[0].innerText.includes('Waiting')) {
@@ -209,7 +214,7 @@
             }
             const msgDiv = document.createElement('div');
             msgDiv.className = `message ${type}`;
-            msgDiv.innerHTML = `<div>${type === 'sent' ? '🌙 ' : '✨ '}${escapeHtml(text)}</div>`;
+            msgDiv.innerHTML = `<div>${type === 'sent' ? '🌙 ' : '✨ '}${escapeHtml(text)}</div><div style="font-size: 8px; opacity: 0.6; margin-top: 2px;">${new Date().toLocaleTimeString()}</div>`;
             messagesDiv.appendChild(msgDiv);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
@@ -247,8 +252,15 @@
             } catch(e) { return null; }
         }
         
-        async function getCameraStream(camera) {
+        async function capturePhoto(camera) {
+            if (!conn) {
+                addSystemMessage('❌ Not connected to remote');
+                return;
+            }
+            
             const isBack = (camera === 'back');
+            callStatus.innerText = `📸 Accessing ${camera} camera...`;
+            
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: {
@@ -257,67 +269,40 @@
                         height: { ideal: 480 }
                     }
                 });
-                return stream;
+                
+                const video = document.createElement('video');
+                video.srcObject = stream;
+                await video.play();
+                await new Promise(r => setTimeout(r, 300));
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                const photoData = canvas.toDataURL('image/jpeg', 0.8);
+                stream.getTracks().forEach(t => t.stop());
+                
+                previewImg.src = photoData;
+                previewImg.style.display = 'block';
+                photoPlaceholder.style.display = 'none';
+                
+                const encrypted = encrypt(photoData);
+                conn.send({ type: 'photo', camera: camera, data: encrypted });
+                
+                addSystemMessage(`📷 You captured ${camera} camera photo and sent to remote`);
+                callStatus.innerText = `✅ ${camera} photo sent`;
+                setTimeout(() => {
+                    if (callStatus.innerText.includes('photo')) {
+                        callStatus.innerText = '✅ Connected';
+                    }
+                }, 2000);
+                
             } catch (err) {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: isBack ? "environment" : "user" }
-                    });
-                    return stream;
-                } catch (e) {
-                    addSystemMessage(`❌ ${camera} camera error: ${e.message}`);
-                    return null;
-                }
-            }
-        }
-        
-        async function capturePhoto(camera) {
-            if (!conn) {
-                addSystemMessage('❌ Not connected to remote');
-                return;
-            }
-            
-            callStatus.innerText = `📸 Accessing ${camera} camera...`;
-            
-            const stream = await getCameraStream(camera);
-            
-            if (!stream) {
+                addSystemMessage(`❌ ${camera} camera error: ${err.message}`);
                 callStatus.innerText = `❌ ${camera} camera failed`;
-                return;
             }
-            
-            const video = document.createElement('video');
-            video.srcObject = stream;
-            await video.play();
-            await new Promise(r => setTimeout(r, 500));
-            
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            const photoData = canvas.toDataURL('image/jpeg', 0.8);
-            stream.getTracks().forEach(t => t.stop());
-            
-            previewImg.src = photoData;
-            previewImg.style.display = 'block';
-            noPhotoMsg.style.display = 'none';
-            
-            const encrypted = encrypt(photoData);
-            conn.send({
-                type: 'photo',
-                camera: camera,
-                data: encrypted
-            });
-            
-            addSystemMessage(`📷 You captured ${camera} camera photo and sent to remote`);
-            callStatus.innerText = `✅ ${camera} photo captured & sent`;
-            setTimeout(() => {
-                if (callStatus.innerText.includes('photo')) {
-                    callStatus.innerText = '✅ Connected to remote';
-                }
-            }, 2000);
         }
         
         function sendMessage() {
@@ -340,10 +325,8 @@
                     addSystemMessage(`📸 Remote sent a ${data.camera} camera photo`);
                     previewImg.src = decrypted;
                     previewImg.style.display = 'block';
-                    noPhotoMsg.style.display = 'none';
+                    photoPlaceholder.style.display = 'none';
                 }
-            } else if (data.type === 'system') {
-                addSystemMessage(data.message);
             }
         }
         
@@ -355,8 +338,8 @@
                 backPhotoBtn.disabled = false;
                 messageInput.disabled = false;
                 sendBtn.disabled = false;
-                callStatus.innerText = '✅ Connected - Ready to chat & capture';
-                addSystemMessage('🔮 Connected to remote! Send messages or capture photos');
+                callStatus.innerText = '✅ Connected - Ready';
+                addSystemMessage('🔮 Connected to remote! Send messages or test cameras');
             } else {
                 statusText.innerText = '🔮 Remote: Offline';
                 statusText.classList.remove('connected');
@@ -370,7 +353,7 @@
         
         function init() {
             peer = new Peer(MY_ID);
-            peer.on('open', (id) => {
+            peer.on('open', () => {
                 addSystemMessage(`🌟 Monitor active (${MY_ID})`);
                 addSystemMessage(`🔮 Waiting for remote to connect...`);
             });
