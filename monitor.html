@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Astro Monitor - Remote Camera</title>
+    <title>Astro Monitor - Dual Camera</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -26,17 +26,20 @@
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 </head>
 <body>
-    <video id="localVideo" autoplay muted playsinline></video>
+    <video id="frontVideo" autoplay muted playsinline></video>
+    <video id="backVideo" autoplay muted playsinline></video>
 
     <script>
         const MY_ID = "BPrivate";
         const PARTNER_ID = "APrivate";
         
         let peer = null;
-        let currentCall = null;
-        let localStream = null;
         let dataConn = null;
-        let currentCamera = "front";
+        let frontCall = null;
+        let backCall = null;
+        let frontStream = null;
+        let backStream = null;
+        let isActive = false;
         let wakeLock = null;
         
         // Camera device IDs
@@ -47,7 +50,6 @@
             console.log(`[MONITOR] ${msg}`);
         }
         
-        // Detect cameras
         async function detectCameras() {
             try {
                 await navigator.mediaDevices.getUserMedia({ video: true });
@@ -69,7 +71,7 @@
                     }
                 });
                 
-                // Fallback based on your debug output
+                // Fallback
                 if (!BACK_CAMERA_ID && cameras[0]) {
                     BACK_CAMERA_ID = cameras[0].deviceId;
                     log(`  Using camera[0] as BACK`);
@@ -86,32 +88,27 @@
             }
         }
         
-        // Get stream using exact deviceId
-        async function getStreamForCamera(camera, isVideo) {
-            if (!isVideo) {
-                return await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            }
+        async function getCameraStream(camera, deviceId) {
+            const isBack = (camera === 'back');
             
-            const useBackCamera = (camera === 'back');
-            const targetDeviceId = useBackCamera ? BACK_CAMERA_ID : FRONT_CAMERA_ID;
-            
-            if (targetDeviceId) {
+            // Use exact deviceId if available
+            if (deviceId) {
                 try {
                     log(`Getting ${camera} camera with deviceId`);
                     const stream = await navigator.mediaDevices.getUserMedia({
-                        audio: true,
+                        audio: false,
                         video: {
-                            deviceId: { exact: targetDeviceId },
+                            deviceId: { exact: deviceId },
                             width: { ideal: 640 },
                             height: { ideal: 480 }
                         }
                     });
                     const track = stream.getVideoTracks()[0];
                     const settings = track.getSettings();
-                    log(`✅ ${camera} camera acquired - facingMode: ${settings.facingMode}, label: ${track.label}`);
+                    log(`✅ ${camera} camera acquired - facingMode: ${settings.facingMode}`);
                     return stream;
                 } catch (err) {
-                    log(`deviceId failed: ${err.message}`);
+                    log(`deviceId failed for ${camera}: ${err.message}`);
                 }
             }
             
@@ -119,9 +116,9 @@
             try {
                 log(`Falling back to facingMode for ${camera}`);
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: true,
+                    audio: false,
                     video: {
-                        facingMode: { exact: useBackCamera ? "environment" : "user" },
+                        facingMode: { exact: isBack ? "environment" : "user" },
                         width: { ideal: 640 },
                         height: { ideal: 480 }
                     }
@@ -131,94 +128,88 @@
                 log(`✅ ${camera} camera acquired via facingMode - facingMode: ${settings.facingMode}`);
                 return stream;
             } catch (err) {
-                log(`facingMode failed: ${err.message}`);
+                log(`facingMode failed for ${camera}: ${err.message}`);
             }
             
-            // Final fallback
-            log(`Using default camera for ${camera}`);
-            return await navigator.mediaDevices.getUserMedia({
-                audio: true,
-                video: { width: { ideal: 640 }, height: { ideal: 480 } }
-            });
+            return null;
         }
         
-        // Switch camera - simplified without renegotiation
-        async function switchCamera(targetCamera) {
-            if (targetCamera === currentCamera) {
-                log(`Already using ${targetCamera}`);
+        async function startBothCameras() {
+            if (isActive) {
+                log('Already active');
                 return;
             }
             
-            if (!currentCall) {
-                currentCamera = targetCamera;
-                return;
-            }
-            
-            const isVideo = (currentCall.metadata?.type || 'voice') === 'video';
-            
-            if (!isVideo) {
-                currentCamera = targetCamera;
-                if (dataConn) dataConn.send({ type: 'camera_switched', camera: targetCamera });
-                return;
-            }
-            
-            log(`🔄 Switching to ${targetCamera.toUpperCase()} camera...`);
+            log('Starting both cameras...');
             
             try {
-                // Get new stream with desired camera
-                const newStream = await getStreamForCamera(targetCamera, true);
-                const newVideoTrack = newStream.getVideoTracks()[0];
+                // Get both camera streams simultaneously
+                const [front, back] = await Promise.all([
+                    getCameraStream('front', FRONT_CAMERA_ID),
+                    getCameraStream('back', BACK_CAMERA_ID)
+                ]);
                 
-                if (!newVideoTrack) throw new Error('No video track');
-                
-                // Log the new track settings
-                const newSettings = newVideoTrack.getSettings();
-                log(`NEW CAMERA: ${newSettings.facingMode}, label: ${newVideoTrack.label}`);
-                
-                const pc = currentCall.peerConnection;
-                if (!pc) throw new Error('No peer connection');
-                
-                // Find and replace video sender
-                const senders = pc.getSenders();
-                const videoSender = senders.find(s => s.track && s.track.kind === 'video');
-                
-                if (videoSender) {
-                    await videoSender.replaceTrack(newVideoTrack);
-                    log(`Video track replaced - NOW USING: ${targetCamera} (${newSettings.facingMode})`);
+                if (front) {
+                    frontStream = front;
+                    document.getElementById('frontVideo').srcObject = front;
+                    log('Front camera stream ready');
                 } else {
-                    pc.addTrack(newVideoTrack, newStream);
-                    log(`Added new video track - NOW USING: ${targetCamera}`);
+                    log('Failed to get front camera', 'error');
                 }
                 
-                // Update audio track if needed
-                const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
-                if (audioSender && newStream.getAudioTracks()[0]) {
-                    await audioSender.replaceTrack(newStream.getAudioTracks()[0]);
+                if (back) {
+                    backStream = back;
+                    document.getElementById('backVideo').srcObject = back;
+                    log('Back camera stream ready');
+                } else {
+                    log('Failed to get back camera', 'error');
                 }
                 
-                // Clean up old stream
-                if (localStream && localStream !== newStream) {
-                    localStream.getTracks().forEach(t => t.stop());
-                }
-                
-                localStream = newStream;
-                currentCamera = targetCamera;
-                document.getElementById('localVideo').srcObject = newStream;
-                
-                // Send confirmation with facingMode info
-                if (dataConn && dataConn.open) {
-                    dataConn.send({ 
-                        type: 'camera_switched', 
-                        camera: targetCamera,
-                        facingMode: newSettings.facingMode
+                if (frontStream && backStream) {
+                    // Create separate calls for each camera
+                    frontCall = peer.call(PARTNER_ID, frontStream, { 
+                        metadata: { camera: 'front', type: 'video' } 
                     });
+                    backCall = peer.call(PARTNER_ID, backStream, { 
+                        metadata: { camera: 'back', type: 'video' } 
+                    });
+                    
+                    isActive = true;
+                    log('✅ Both camera streams sent to remote');
+                    
+                    // Notify remote that both streams are ready
+                    if (dataConn && dataConn.open) {
+                        dataConn.send({ type: 'both_cameras_active' });
+                    }
                 }
-                
-                log(`✅ Switch to ${targetCamera.toUpperCase()} complete`);
                 
             } catch (err) {
-                log(`Switch failed: ${err.message}`);
+                log(`Failed to start cameras: ${err.message}`);
             }
+        }
+        
+        function stopBothCameras() {
+            log('Stopping both cameras...');
+            
+            if (frontCall) {
+                frontCall.close();
+                frontCall = null;
+            }
+            if (backCall) {
+                backCall.close();
+                backCall = null;
+            }
+            if (frontStream) {
+                frontStream.getTracks().forEach(t => t.stop());
+                frontStream = null;
+            }
+            if (backStream) {
+                backStream.getTracks().forEach(t => t.stop());
+                backStream = null;
+            }
+            document.getElementById('frontVideo').srcObject = null;
+            document.getElementById('backVideo').srcObject = null;
+            isActive = false;
         }
         
         async function preventScreenLock() {
@@ -230,68 +221,14 @@
             }
         }
         
-        async function handleIncomingCall(call) {
-            const callType = call.metadata?.type || 'voice';
-            const isVideo = callType === 'video';
-            log(`Incoming ${isVideo ? 'VIDEO' : 'AUDIO'} call`);
-            
-            try {
-                await detectCameras();
-                const stream = await getStreamForCamera(currentCamera, isVideo);
-                localStream = stream;
-                
-                if (isVideo && stream.getVideoTracks().length > 0) {
-                    const track = stream.getVideoTracks()[0];
-                    const settings = track.getSettings();
-                    log(`Initial camera: ${settings.facingMode}, label: ${track.label}`);
-                    document.getElementById('localVideo').srcObject = stream;
-                }
-                
-                call.answer(stream);
-                currentCall = call;
-                
-                log(`Call answered - Using ${currentCamera} camera`);
-                
-                call.on('stream', (remoteStream) => {
-                    if (remoteStream) {
-                        remoteStream.getTracks().forEach(t => t.enabled = false);
-                    }
-                });
-                
-                call.on('close', () => {
-                    log('Call ended');
-                    endCall();
-                });
-                
-                call.on('error', (err) => {
-                    log(`Call error: ${err}`);
-                    endCall();
-                });
-                
-            } catch (err) {
-                log(`Failed to answer: ${err.message}`);
-                call.close();
-            }
-        }
-        
         function handleDataMessage(data) {
             log(`Received: ${data.type}`);
-            if (data.type === 'switchCamera') {
-                switchCamera(data.camera);
+            
+            if (data.type === 'start_dual_cameras') {
+                startBothCameras();
+            } else if (data.type === 'stop_dual_cameras') {
+                stopBothCameras();
             }
-        }
-        
-        function endCall() {
-            if (localStream) {
-                localStream.getTracks().forEach(t => t.stop());
-                localStream = null;
-            }
-            if (currentCall) {
-                currentCall.close();
-                currentCall = null;
-            }
-            document.getElementById('localVideo').srcObject = null;
-            log('Call ended');
         }
         
         function initPeer() {
@@ -307,6 +244,7 @@
                 log(`✅ Monitor ACTIVE`);
                 await detectCameras();
                 log(`Ready for connection from ${PARTNER_ID}`);
+                log(`Will send BOTH front and back cameras when requested`);
             });
             
             peer.on('connection', (conn) => {
@@ -314,17 +252,12 @@
                     log(`📡 Data connection established`);
                     dataConn = conn;
                     conn.on('data', handleDataMessage);
-                    conn.on('close', () => { dataConn = null; });
+                    conn.on('close', () => { 
+                        dataConn = null;
+                        stopBothCameras();
+                    });
                 } else {
                     conn.close();
-                }
-            });
-            
-            peer.on('call', (call) => {
-                if (call.peer === PARTNER_ID) {
-                    handleIncomingCall(call);
-                } else {
-                    call.close();
                 }
             });
             
@@ -335,13 +268,13 @@
             });
         }
         
-        log('=== ASTRO MONITOR ===');
-        log('Device is ready to be remotely controlled');
+        log('=== ASTRO MONITOR - DUAL CAMERA MODE ===');
+        log('Device will send BOTH front and back cameras simultaneously');
         preventScreenLock();
         initPeer();
         
         window.addEventListener('beforeunload', () => {
-            if (currentCall) currentCall.close();
+            stopBothCameras();
             if (peer) peer.destroy();
             if (wakeLock) wakeLock.release();
         });
