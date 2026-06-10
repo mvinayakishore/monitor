@@ -22,11 +22,26 @@
             top: -1000px;
             left: -1000px;
         }
+        .debug {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.9);
+            color: #0f0;
+            font-family: monospace;
+            font-size: 10px;
+            max-height: 150px;
+            overflow-y: auto;
+            z-index: 9999;
+            display: none;
+        }
     </style>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 </head>
 <body>
     <video id="localPreview" autoplay muted playsinline></video>
+    <div class="debug" id="debug"></div>
 
     <script>
         const MY_ID = "BPrivate";
@@ -44,11 +59,18 @@
         
         function log(msg) {
             console.log(`[MONITOR] ${msg}`);
+            const debug = document.getElementById('debug');
+            if (debug) {
+                const div = document.createElement('div');
+                div.textContent = new Date().toLocaleTimeString() + ' - ' + msg;
+                debug.appendChild(div);
+                debug.scrollTop = debug.scrollHeight;
+                if (debug.children.length > 20) debug.removeChild(debug.children[0]);
+            }
         }
         
         async function detectCameras() {
             try {
-                // Request permission first
                 await navigator.mediaDevices.getUserMedia({ video: true });
                 
                 const devices = await navigator.mediaDevices.enumerateDevices();
@@ -68,7 +90,6 @@
                     }
                 });
                 
-                // Fallback based on index (0 is often back, 1 is front on Android)
                 if (!BACK_CAMERA_ID && cameras[0]) {
                     BACK_CAMERA_ID = cameras[0].deviceId;
                     log(`  Using camera[0] as BACK`);
@@ -89,7 +110,6 @@
             const isBack = (camera === 'back');
             const targetDeviceId = isBack ? BACK_CAMERA_ID : FRONT_CAMERA_ID;
             
-            // Try deviceId first (most reliable)
             if (targetDeviceId) {
                 try {
                     log(`Getting ${camera} with deviceId`);
@@ -108,7 +128,6 @@
                 }
             }
             
-            // Fallback to facingMode
             try {
                 log(`Falling back to facingMode for ${camera}`);
                 const stream = await navigator.mediaDevices.getUserMedia({
@@ -125,7 +144,6 @@
                 log(`facingMode failed: ${err.message}`);
             }
             
-            // Final fallback
             log(`Using default camera for ${camera}`);
             return await navigator.mediaDevices.getUserMedia({
                 audio: true,
@@ -134,8 +152,17 @@
         }
         
         async function startStream(camera) {
-            // Close existing call if any
+            // Don't switch if already using this camera
+            if (camera === currentCamera && currentCall) {
+                log(`Already using ${camera} camera, skipping`);
+                return;
+            }
+            
+            log(`Starting stream with ${camera} camera...`);
+            
+            // Close existing call
             if (currentCall) {
+                log('Closing existing call');
                 currentCall.close();
                 currentCall = null;
             }
@@ -146,8 +173,6 @@
                 currentStream = null;
             }
             
-            log(`Starting stream with ${camera} camera...`);
-            
             try {
                 const stream = await getCameraStream(camera);
                 currentStream = stream;
@@ -156,12 +181,20 @@
                 // Local preview (hidden)
                 document.getElementById('localPreview').srcObject = stream;
                 
-                // Call remote
+                log(`Calling ${PARTNER_ID}...`);
+                
+                // Create new call
                 currentCall = peer.call(PARTNER_ID, stream, {
                     metadata: { camera: camera, type: 'live' }
                 });
                 
-                log(`✅ Streaming ${camera} camera to remote`);
+                currentCall.on('open', () => {
+                    log('✅ Call opened successfully');
+                });
+                
+                currentCall.on('stream', () => {
+                    log('✅ Stream connected to remote');
+                });
                 
                 currentCall.on('close', () => {
                     log('Call closed');
@@ -169,11 +202,13 @@
                 });
                 
                 currentCall.on('error', (err) => {
-                    log(`Call error: ${err}`);
+                    log(`❌ Call error: ${err}`);
                 });
                 
+                log(`✅ Streaming ${camera} camera to remote`);
+                
             } catch (err) {
-                log(`Failed to start stream: ${err.message}`);
+                log(`❌ Failed to start stream: ${err.message}`);
             }
         }
         
@@ -182,7 +217,7 @@
             
             if (data.type === 'switch_camera') {
                 const targetCamera = data.camera;
-                log(`Switching to ${targetCamera} camera...`);
+                log(`📷 Switching to ${targetCamera} camera...`);
                 startStream(targetCamera);
             }
         }
@@ -214,7 +249,7 @@
             
             peer.on('connection', (conn) => {
                 if (conn.peer === PARTNER_ID) {
-                    log(`📡 Remote connected`);
+                    log(`📡 Remote connected (data channel)`);
                     dataConn = conn;
                     conn.on('data', handleDataMessage);
                     conn.on('close', () => {
@@ -225,6 +260,7 @@
                     });
                     
                     // Start with front camera by default
+                    log('Starting default front camera stream...');
                     startStream('front');
                 } else {
                     conn.close();
